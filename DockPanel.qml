@@ -56,16 +56,28 @@ PanelWindow {
     || (Quickshell.env("HOME") + "/.local/state")) + "/quickshelldock"
   readonly property string orderPath: stateDir + "/order.json"
   readonly property string pinsPath: stateDir + "/pins.json"
+  readonly property string hiddenPath: stateDir + "/hidden.json"
   readonly property string pinTool: Quickshell.shellDir + "/bin/quickshelldock-pin"
   property var savedOrder: []
   property var pinnedApps: []
+  property var hiddenApps: []
 
   // Right-click context menu state.
   property bool contextOpen: false
-  property string contextName: ""
-  property string contextId: ""
-  property bool contextPinned: false
+  property string contextKey: ""
+  property var contextAppData: null
+  property bool contextRunning: false
   property real contextAnchorX: 0
+
+  // Matches what other docks offer: GNOME's dash-to-dock, the macOS Dock and
+  // KDE's task manager all agree on new-window / pin-unpin / quit. Window
+  // lists and "App Details" are deliberately left out — out of scope here.
+  readonly property var contextActions: {
+    let actions = [{ label: "Open new window", act: "new" }]
+    if (root.contextRunning) actions.push({ label: "Quit", act: "quit" })
+    actions.push({ label: "Unpin from dock", act: "unpin" })
+    return actions
+  }
 
   Process {
     id: clientsProcess
@@ -87,6 +99,21 @@ PanelWindow {
     blockLoading: true
     printErrors: false
     atomicWrites: true
+  }
+
+  // Config apps removed from the dock. Suppressed here rather than by
+  // rewriting UserConfig.qml, which is the user's to own.
+  FileView {
+    id: hiddenFile
+    path: root.hiddenPath
+    blockLoading: true
+    printErrors: false
+    watchChanges: true
+    onFileChanged: reload()
+    onTextChanged: {
+      root.loadHidden()
+      if (!root.dragging) root.rebuildModel()
+    }
   }
 
   // Written by bin/quickshelldock-pin, never by the dock. Watching it is what
@@ -123,6 +150,15 @@ PanelWindow {
       appId: app.appId ?? "",
       minimizable: app.minimizable !== false,
       order: app.order ?? 0,
+    }
+  }
+
+  function loadHidden() {
+    try {
+      const raw = hiddenFile.text()
+      hiddenApps = raw ? (JSON.parse(raw) || []) : []
+    } catch (e) {
+      hiddenApps = []
     }
   }
 
@@ -181,7 +217,11 @@ PanelWindow {
     }
 
     appModel.clear()
-    for (const app of apps) appModel.append(app)
+    for (const app of apps) {
+      if (hiddenApps.indexOf(app.name) >= 0) continue
+      if (app.entryId && hiddenApps.indexOf(app.entryId) >= 0) continue
+      appModel.append(app)
+    }
   }
 
   function persistOrder() {
@@ -285,13 +325,15 @@ PanelWindow {
   }
 
   function openContextMenu(item) {
-    if (root.contextOpen && root.contextName === item.name) {
+    if (root.contextOpen && root.contextKey === (item.entryId || item.name)) {
       root.closeContextMenu()
       return
     }
-    root.contextName = item.name
-    root.contextId = item.entryId
-    root.contextPinned = item.pinned
+    // Pinned apps unpin by desktop id; config apps have none, so they unpin by
+    // name and the pin tool suppresses them instead of editing UserConfig.qml.
+    root.contextKey = item.entryId || item.name
+    root.contextAppData = item.appData
+    root.contextRunning = item.isRunning
     root.contextAnchorX = dockBar.mapFromItem(item, item.width / 2, 0).x
     root.contextOpen = true
   }
@@ -300,11 +342,25 @@ PanelWindow {
     root.contextOpen = false
   }
 
-  function unpinContext() {
-    if (!root.contextPinned || !root.contextId) return
-    // The CLI owns pins.json; the watcher above picks the change back up.
-    Quickshell.execDetached([root.pinTool, "--unpin", root.contextId])
+  function runContextAction(act) {
+    const app = root.contextAppData
     root.closeContextMenu()
+    if (!app) return
+
+    if (act === "new") {
+      Quickshell.execDetached(app.cmd.split(/\s+/))
+    } else if (act === "quit") {
+      for (const t of root.getToplevelsForApp(app)) {
+        let addr = t.toplevel.lastIpcObject?.address
+        if (!addr || addr === "0") addr = "0x" + t.toplevel.address
+        if (addr && addr !== "0x0") {
+          Hyprland.dispatch('hl.dsp.window.close({ window = "address:' + addr + '" })')
+        }
+      }
+    } else if (act === "unpin" && root.contextKey) {
+      // The CLI owns pins.json and hidden.json; the watchers pick the change up.
+      Quickshell.execDetached([root.pinTool, "--unpin", root.contextKey])
+    }
   }
 
   function showDockBar() {
@@ -326,6 +382,7 @@ PanelWindow {
   Component.onCompleted: {
     loadSavedOrder()
     loadPins()
+    loadHidden()
     rebuildModel()
     updateWorkspaceEmpty()
   }
@@ -687,7 +744,7 @@ PanelWindow {
     Rectangle {
       id: contextCard
 
-      implicitWidth: Math.max(150, nameText.implicitWidth + 20, actionText.implicitWidth + 24)
+      implicitWidth: Math.max(150, widthProbe.implicitWidth + 24)
       implicitHeight: contextColumn.implicitHeight + 16
 
       color: "#1e1e2e"
@@ -698,46 +755,46 @@ PanelWindow {
       Column {
         id: contextColumn
         anchors.centerIn: parent
-        spacing: 2
+        spacing: 1
 
-        Text {
-          id: nameText
-          text: root.contextName
-          color: "#cdd6f4"
-          opacity: 0.55
-          font.pixelSize: 11
-          font.bold: true
-          leftPadding: 8
-          bottomPadding: 2
-        }
+        Repeater {
+          model: root.contextActions
 
-        Rectangle {
-          width: contextCard.width - 8
-          height: 26
-          radius: 6
-          color: unpinHover.hovered && root.contextPinned ? "#313244" : "transparent"
+          delegate: Rectangle {
+            required property var modelData
 
-          HoverHandler { id: unpinHover }
+            width: contextCard.width - 8
+            height: 26
+            radius: 6
+            color: rowHover.hovered ? "#313244" : "transparent"
 
-          TapHandler {
-            enabled: root.contextPinned
-            acceptedButtons: Qt.LeftButton
-            onSingleTapped: root.unpinContext()
-          }
+            HoverHandler { id: rowHover }
 
-          Text {
-            id: actionText
-            anchors.verticalCenter: parent.verticalCenter
-            x: 8
-            // Only apps added by the pin tool can be removed from here; the
-            // ones in UserConfig.qml are the user's own declarative config.
-            text: root.contextPinned ? "Unpin from dock" : "Set in UserConfig.qml"
-            color: "#cdd6f4"
-            opacity: root.contextPinned ? 1 : 0.4
-            font.pixelSize: 12
+            TapHandler {
+              acceptedButtons: Qt.LeftButton
+              onSingleTapped: root.runContextAction(modelData.act)
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              x: 8
+              text: modelData.label
+              color: "#cdd6f4"
+              font.pixelSize: 12
+            }
           }
         }
+      }
+
+      // Sizes the card without reading the Column back, which would be a
+      // polish loop since the rows take their width from the card.
+      Text {
+        id: widthProbe
+        visible: false
+        text: "Open new window"
+        font.pixelSize: 12
       }
     }
   }
 }
+

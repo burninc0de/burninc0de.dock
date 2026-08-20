@@ -62,8 +62,33 @@ Without the patch you can still add a `Dock › Pin app to dock` row to `~/.conf
 pointing at `quickshelldock-pin --pick`, which needs no changes to Omarchy at all.
 
 Pins layer on top of `UserConfig.qml` rather than replacing it, and an app already declared there is not duplicated.
-Right-click an icon on the dock to unpin it — apps that come from `UserConfig.qml` say so instead, since removing
-those means editing the file.
+
+## Right-click menu
+
+Right-clicking a dock icon offers the three actions every other dock agrees on — GNOME's dash-to-dock, the macOS Dock
+and KDE's task manager all share them:
+
+| Action | Shown |
+|--------|-------|
+| Open new window | always |
+| Quit | only while the app is running; closes all of its windows |
+| Unpin from dock | always |
+
+Window lists, thumbnails and "App Details" are deliberately absent — they belong to the scope this dock doesn't have.
+
+Unpin works on every icon, wherever it came from. Apps pinned with the tool are dropped from `pins.json`; apps
+declared in `UserConfig.qml` are recorded in `hidden.json` instead, because rewriting your hand-written QML isn't the
+dock's business. A hidden app isn't on the dock any more, so bring it back with `--restore-pick` (or the
+`Dock › Restore removed app` menu row):
+
+```sh
+bin/quickshelldock-pin --list-hidden
+bin/quickshelldock-pin --restore Obsidian
+```
+
+Right-clicking the app in the Super+Space menu also restores it, as long as the dock's display name matches the
+desktop entry's `Name=`. Where you renamed it in `UserConfig.qml` — a "foot" entry labelled "Terminal", say — use
+`--restore` with the dock's name.
 
 ## Reordering
 

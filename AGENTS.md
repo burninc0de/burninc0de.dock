@@ -17,6 +17,9 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 - Pins merge after config apps and dedupe on name or cmd, so pinning something already in `UserConfig.qml` is a no-op
 - Some packaged `.desktop` files ship an unsubstituted `StartupWMClass` placeholder (Chromium's is
   `@@startup_wm_class`); the pin tool drops those so matching falls back to the binary name
+- Unpin is two mechanisms behind one verb: pinned apps leave `pins.json`, config apps enter `hidden.json`. The dock
+  filters the merged list on both `name` and `entryId`
+- The context menu passes `entryId || name` as the unpin key, so config apps (which have no desktop id) key by name
 - Desktop ids are stored without the `.desktop` suffix but must not be blindly stripped — `org.telegram.desktop` is a
   real id
 

@@ -11,6 +11,10 @@ set -euo pipefail
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/quickshelldock"
 PINS_FILE="$STATE_DIR/pins.json"
+# Apps declared in UserConfig.qml can't be removed by editing pins.json, and
+# rewriting the user's hand-written QML is not this tool's business. They get
+# suppressed by name here instead, so "unpin" works on every dock icon.
+HIDDEN_FILE="$STATE_DIR/hidden.json"
 
 die() {
   echo "quickshelldock-pin: $*" >&2
@@ -72,18 +76,25 @@ strip_field_codes() {
   sed -E 's/%[fFuUdDnNickvm]//g; s/[[:space:]]+/ /g; s/^ //; s/ $//'
 }
 
-read_pins() {
-  [[ -s "$PINS_FILE" ]] && jq -e 'type == "array"' "$PINS_FILE" >/dev/null 2>&1 \
-    && cat "$PINS_FILE" || echo '[]'
+read_json_array() {
+  [[ -s "$1" ]] && jq -e 'type == "array"' "$1" >/dev/null 2>&1 && cat "$1" || echo '[]'
 }
 
-write_pins() {
+write_json_array() {
   mkdir -p "$STATE_DIR"
   local tmp
-  tmp=$(mktemp "$PINS_FILE.XXXXXX")
+  tmp=$(mktemp "$1.XXXXXX")
   cat >"$tmp"
-  mv "$tmp" "$PINS_FILE"
+  mv "$tmp" "$1"
 }
+
+read_pins() { read_json_array "$PINS_FILE"; }
+write_pins() { write_json_array "$PINS_FILE"; }
+read_hidden() { read_json_array "$HIDDEN_FILE"; }
+write_hidden() { write_json_array "$HIDDEN_FILE"; }
+
+hide() { read_hidden | jq --arg k "$1" 'if index([$k]) then . else . + [$k] end' | write_hidden; }
+unhide() { read_hidden | jq --arg k "$1" 'map(select(. != $k))' | write_hidden; }
 
 is_pinned() {
   read_pins | jq -e --arg id "$1" 'any(.[]; .id == $id)' >/dev/null 2>&1
@@ -120,6 +131,10 @@ pin() {
     '. + [{ id: $id, name: $name, icon: $icon, cmd: $cmd, appId: $appId }]' \
     | write_pins
 
+  # A previously removed config app should come back rather than stay hidden.
+  unhide "$id"
+  unhide "$name"
+
   notify "Pinned to dock" "$name"
 }
 
@@ -127,14 +142,46 @@ unpin() {
   local key="$1" name
 
   name=$(read_pins | jq -r --arg k "$key" 'map(select(.id == $k or .name == $k)) | .[0].name // empty')
-  [[ -n $name ]] || die "not pinned: $key (only apps pinned with this tool can be unpinned; others live in UserConfig.qml)"
+  if [[ -n $name ]]; then
+    read_pins | jq --arg k "$key" 'map(select(.id != $k and .name != $k))' | write_pins
+    notify "Unpinned from dock" "$name"
+    return
+  fi
 
-  read_pins | jq --arg k "$key" 'map(select(.id != $k and .name != $k))' | write_pins
-  notify "Unpinned from dock" "$name"
+  # Not one of ours: it comes from UserConfig.qml, so suppress it by name.
+  hide "$key"
+  notify "Removed from dock" "$key"
+}
+
+restore() {
+  local key="$1"
+  read_hidden | jq -e --arg k "$key" 'index([$k])' >/dev/null 2>&1 || die "not hidden: $key"
+  unhide "$key"
+  notify "Restored to dock" "$key"
+}
+
+is_hidden() {
+  read_hidden | jq -e --arg k "$1" 'index([$k])' >/dev/null 2>&1
 }
 
 toggle() {
-  if is_pinned "$1"; then unpin "$1"; else pin "$1"; fi
+  local key="$1" name
+  if is_pinned "$key"; then
+    unpin "$key"
+    return
+  fi
+  # A config app that was removed from the dock comes back instead of being
+  # pinned a second time. Its hidden key is the display name, not the id.
+  if is_hidden "$key"; then
+    restore "$key"
+    return
+  fi
+  name=$(entry_key "$(find_desktop "$key" 2>/dev/null)" Name 2>/dev/null || true)
+  if [[ -n $name ]] && is_hidden "$name"; then
+    restore "$name"
+    return
+  fi
+  pin "$key"
 }
 
 # "<glyph>\t<label>\t<subtext>" — omarchy's picker shows the glyph, renders the
@@ -187,6 +234,19 @@ unpick() {
   unpin "$id"
 }
 
+# A removed config app is not on the dock any more, so it cannot be
+# right-clicked back. This is the way home.
+restore_pick() {
+  require_picker
+  local options selection name
+  options=$(read_hidden | jq -r '.[] | "\t" + .')
+  [[ -n $options ]] || { notify "Nothing to restore" "No apps have been removed"; exit 0; }
+  selection=$(printf '%s\n' "$options" | omarchy-menu-select "Restore to dock") || exit 0
+  name=$(printf '%s' "$selection" | cut -d$'\t' -f1)
+  [[ -n $name ]] || exit 0
+  restore "$name"
+}
+
 usage() {
   cat <<'USAGE'
 Usage: quickshelldock-pin <desktop-id>          Pin an app
@@ -194,23 +254,29 @@ Usage: quickshelldock-pin <desktop-id>          Pin an app
        quickshelldock-pin --toggle <desktop-id> Pin if absent, unpin if present
        quickshelldock-pin --pick                Choose an app to pin (Omarchy menu)
        quickshelldock-pin --unpick              Choose an app to unpin (Omarchy menu)
+       quickshelldock-pin --restore <name>      Put a removed config app back
+       quickshelldock-pin --restore-pick        Choose an app to restore (Omarchy menu)
        quickshelldock-pin --list                List pinned apps
+       quickshelldock-pin --list-hidden         List removed config apps
        quickshelldock-pin --pinned <desktop-id> Exit 0 if pinned, 1 if not
 
 Pins are stored in $XDG_STATE_HOME/quickshelldock/pins.json and merge on top
-of config/UserConfig.qml. Apps defined in UserConfig.qml cannot be unpinned
-with this tool — edit that file instead.
+of config/UserConfig.qml. Unpinning an app that came from UserConfig.qml
+records it in hidden.json instead of editing your QML; --restore undoes that.
 USAGE
 }
 
 case "${1-}" in
   "" | -h | --help) usage ;;
   --list) read_pins | jq -r '.[] | .name + "\t" + .id' ;;
+  --list-hidden) read_hidden | jq -r '.[]' ;;
+  --restore) [[ -n ${2-} ]] || die "--restore needs a name"; restore "$2" ;;
   --pinned) [[ -n ${2-} ]] || die "--pinned needs a desktop id"; is_pinned "$2" ;;
   --unpin) [[ -n ${2-} ]] || die "--unpin needs a desktop id"; unpin "$2" ;;
   --toggle) [[ -n ${2-} ]] || die "--toggle needs a desktop id"; toggle "$2" ;;
   --pick) pick ;;
   --unpick) unpick ;;
+  --restore-pick) restore_pick ;;
   -*) die "unknown option: $1" ;;
   *) pin "$1" ;;
 esac
