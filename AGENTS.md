@@ -8,6 +8,18 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 - `DockPanel.qml` — the dock UI: auto-hide, bounce-on-launch, Hyprland toplevel matching, window focus
 - `config/DockApps.qml` — singleton defining the ordered app list (name, icon, cmd, optional `match`)
 
+## Pinning
+
+- `bin/quickshelldock-pin` is the only writer of `pins.json`; the dock shells out to it (via `Quickshell.shellDir`)
+  rather than editing the file itself, so there is one code path for pin state
+- `FileView.reload()` is async — merge pins on `onTextChanged`, not on `onFileChanged`, or you read back stale text
+  and the dock silently ignores the change
+- Pins merge after config apps and dedupe on name or cmd, so pinning something already in `UserConfig.qml` is a no-op
+- Some packaged `.desktop` files ship an unsubstituted `StartupWMClass` placeholder (Chromium's is
+  `@@startup_wm_class`); the pin tool drops those so matching falls back to the binary name
+- Desktop ids are stored without the `.desktop` suffix but must not be blindly stripped — `org.telegram.desktop` is a
+  real id
+
 ## Reordering
 
 - The Repeater is backed by a `ListModel` (`appModel`), not a plain JS array — a `move()` keeps the delegates alive

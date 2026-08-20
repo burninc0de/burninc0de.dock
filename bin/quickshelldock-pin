@@ -1,0 +1,216 @@
+#!/bin/bash
+#
+# Pin and unpin apps on quickshelldock without editing UserConfig.qml.
+#
+# Pinned apps are appended to pins.json in the dock's state dir. The dock
+# watches that file and reloads it live, so a pin shows up immediately.
+# UserConfig.qml stays the declarative base; pins layer on top of it, and
+# the saved drag order applies to the merged list.
+
+set -euo pipefail
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/quickshelldock"
+PINS_FILE="$STATE_DIR/pins.json"
+
+die() {
+  echo "quickshelldock-pin: $*" >&2
+  exit 1
+}
+
+command -v jq >/dev/null || die "jq is required"
+
+notify() {
+  # Optional: this script is useful on any Hyprland box, not just Omarchy.
+  if command -v omarchy-notification-send >/dev/null; then
+    omarchy-notification-send -g "󰐃" "$1" "$2" || true
+  elif command -v notify-send >/dev/null; then
+    notify-send "$1" "$2" || true
+  else
+    echo "$1: $2"
+  fi
+}
+
+desktop_dirs() {
+  local dirs=("$HOME/.local/share/applications")
+  local IFS=:
+  for d in ${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do
+    dirs+=("$d/applications")
+  done
+  printf '%s\n' "${dirs[@]}"
+}
+
+# First match wins, so ~/.local/share overrides /usr/share the way XDG says.
+# "<id>.desktop" is tried before the bare "<id>", because ids ending in
+# .desktop are real (org.telegram.desktop) and must not be stripped.
+find_desktop() {
+  local id="$1" dir
+  while IFS= read -r dir; do
+    [[ -f "$dir/$id.desktop" ]] && { printf '%s\n' "$dir/$id.desktop"; return 0; }
+  done < <(desktop_dirs)
+  while IFS= read -r dir; do
+    [[ -f "$dir/$id" ]] && { printf '%s\n' "$dir/$id"; return 0; }
+  done < <(desktop_dirs)
+  return 1
+}
+
+# Reads a key from the [Desktop Entry] group only, ignoring action groups
+# further down the file (which repeat Name= and Exec= with other values).
+entry_key() {
+  local file="$1" key="$2"
+  awk -v key="$key" '
+    /^\[/ { in_entry = ($0 == "[Desktop Entry]"); next }
+    in_entry && index($0, key "=") == 1 {
+      sub(/^[^=]*=/, "")
+      print
+      exit
+    }
+  ' "$file"
+}
+
+# Exec= carries launcher field codes the dock must not pass to the binary.
+strip_field_codes() {
+  sed -E 's/%[fFuUdDnNickvm]//g; s/[[:space:]]+/ /g; s/^ //; s/ $//'
+}
+
+read_pins() {
+  [[ -s "$PINS_FILE" ]] && jq -e 'type == "array"' "$PINS_FILE" >/dev/null 2>&1 \
+    && cat "$PINS_FILE" || echo '[]'
+}
+
+write_pins() {
+  mkdir -p "$STATE_DIR"
+  local tmp
+  tmp=$(mktemp "$PINS_FILE.XXXXXX")
+  cat >"$tmp"
+  mv "$tmp" "$PINS_FILE"
+}
+
+is_pinned() {
+  read_pins | jq -e --arg id "$1" 'any(.[]; .id == $id)' >/dev/null 2>&1
+}
+
+pin() {
+  local id="$1" file name icon exec_line cmd app_id
+
+  file=$(find_desktop "$id") || die "no desktop entry named '$id'"
+
+  if is_pinned "$id"; then
+    echo "already pinned: $id"
+    return 0
+  fi
+
+  name=$(entry_key "$file" Name)
+  icon=$(entry_key "$file" Icon)
+  exec_line=$(entry_key "$file" Exec)
+  app_id=$(entry_key "$file" StartupWMClass)
+
+  [[ -n $exec_line ]] || die "$id has no Exec= line"
+  cmd=$(printf '%s' "$exec_line" | strip_field_codes)
+  [[ -n $name ]] || name="$id"
+  [[ -n $icon ]] || icon="$id"
+  # Some packaged .desktop files ship an unsubstituted template placeholder
+  # here (Chromium's says "@@startup_wm_class"). Matching on that never hits,
+  # so drop it and let the dock fall back to matching the binary name, which
+  # is right more often than a guess derived from the desktop id anyway.
+  [[ $app_id == *@@* || $app_id == *%* ]] && app_id=""
+
+  read_pins | jq \
+    --arg id "$id" --arg name "$name" --arg icon "$icon" \
+    --arg cmd "$cmd" --arg appId "$app_id" \
+    '. + [{ id: $id, name: $name, icon: $icon, cmd: $cmd, appId: $appId }]' \
+    | write_pins
+
+  notify "Pinned to dock" "$name"
+}
+
+unpin() {
+  local key="$1" name
+
+  name=$(read_pins | jq -r --arg k "$key" 'map(select(.id == $k or .name == $k)) | .[0].name // empty')
+  [[ -n $name ]] || die "not pinned: $key (only apps pinned with this tool can be unpinned; others live in UserConfig.qml)"
+
+  read_pins | jq --arg k "$key" 'map(select(.id != $k and .name != $k))' | write_pins
+  notify "Unpinned from dock" "$name"
+}
+
+toggle() {
+  if is_pinned "$1"; then unpin "$1"; else pin "$1"; fi
+}
+
+# "<glyph>\t<label>\t<subtext>" — omarchy's picker shows the glyph, renders the
+# subtext under the label, and hands back "<label>\t<subtext>". The desktop id
+# rides along as the subtext so same-named apps stay distinguishable.
+list_installed() {
+  local dir file id name nodisplay hidden type
+  declare -A seen=()
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      id=$(basename "$file" .desktop)
+      [[ -n ${seen[$id]:-} ]] && continue
+      seen[$id]=1
+      type=$(entry_key "$file" Type)
+      [[ $type == "Application" ]] || continue
+      nodisplay=$(entry_key "$file" NoDisplay)
+      hidden=$(entry_key "$file" Hidden)
+      [[ $nodisplay == "true" || $hidden == "true" ]] && continue
+      name=$(entry_key "$file" Name)
+      [[ -n $name ]] || name="$id"
+      printf '\t%s\t%s\n' "$name" "$id"
+    done
+  done < <(desktop_dirs) | sort -f -t$'\t' -k2,2
+}
+
+require_picker() {
+  command -v omarchy-menu-select >/dev/null \
+    || die "--pick needs omarchy-menu-select (Omarchy). Pass a desktop id instead."
+}
+
+pick() {
+  require_picker
+  local selection id
+  selection=$(list_installed | omarchy-menu-select "Pin to dock") || exit 0
+  id=$(printf '%s' "$selection" | cut -d$'\t' -f2)
+  [[ -n $id ]] || exit 0
+  pin "$id"
+}
+
+unpick() {
+  require_picker
+  local options selection id
+  options=$(read_pins | jq -r '.[] | "\t" + .name + "\t" + .id')
+  [[ -n $options ]] || { notify "Nothing to unpin" "No apps pinned via the menu"; exit 0; }
+  selection=$(printf '%s\n' "$options" | omarchy-menu-select "Unpin from dock") || exit 0
+  id=$(printf '%s' "$selection" | cut -d$'\t' -f2)
+  [[ -n $id ]] || exit 0
+  unpin "$id"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: quickshelldock-pin <desktop-id>          Pin an app
+       quickshelldock-pin --unpin <id|name>     Unpin an app
+       quickshelldock-pin --toggle <desktop-id> Pin if absent, unpin if present
+       quickshelldock-pin --pick                Choose an app to pin (Omarchy menu)
+       quickshelldock-pin --unpick              Choose an app to unpin (Omarchy menu)
+       quickshelldock-pin --list                List pinned apps
+       quickshelldock-pin --pinned <desktop-id> Exit 0 if pinned, 1 if not
+
+Pins are stored in $XDG_STATE_HOME/quickshelldock/pins.json and merge on top
+of config/UserConfig.qml. Apps defined in UserConfig.qml cannot be unpinned
+with this tool — edit that file instead.
+USAGE
+}
+
+case "${1-}" in
+  "" | -h | --help) usage ;;
+  --list) read_pins | jq -r '.[] | .name + "\t" + .id' ;;
+  --pinned) [[ -n ${2-} ]] || die "--pinned needs a desktop id"; is_pinned "$2" ;;
+  --unpin) [[ -n ${2-} ]] || die "--unpin needs a desktop id"; unpin "$2" ;;
+  --toggle) [[ -n ${2-} ]] || die "--toggle needs a desktop id"; toggle "$2" ;;
+  --pick) pick ;;
+  --unpick) unpick ;;
+  -*) die "unknown option: $1" ;;
+  *) pin "$1" ;;
+esac

@@ -22,9 +22,12 @@ PanelWindow {
   mask: Region {
     Region { item: triggerStrip }
     Region { item: dockBar }
+    Region { item: contextMenu }
   }
 
-  implicitHeight: 80
+  // The window only grows tall enough for the context menu while one is open;
+  // exclusiveZone is -1 either way, so nothing on screen gets pushed around.
+  implicitHeight: root.contextOpen ? 80 + contextCard.height + 10 : 80
 
   readonly property int dockHeight: 68
   readonly property real gap: 6
@@ -35,7 +38,7 @@ PanelWindow {
   readonly property real itemPitch: itemSize + itemSpacing
 
   property bool dockVisible: true
-  property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered
+  property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered || contextHover.hovered
   property bool workspaceEmpty: true
   property string clientsJson: ""
   property int _badgeTick: 0
@@ -52,7 +55,17 @@ PanelWindow {
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME")
     || (Quickshell.env("HOME") + "/.local/state")) + "/quickshelldock"
   readonly property string orderPath: stateDir + "/order.json"
+  readonly property string pinsPath: stateDir + "/pins.json"
+  readonly property string pinTool: Quickshell.shellDir + "/bin/quickshelldock-pin"
   property var savedOrder: []
+  property var pinnedApps: []
+
+  // Right-click context menu state.
+  property bool contextOpen: false
+  property string contextName: ""
+  property string contextId: ""
+  property bool contextPinned: false
+  property real contextAnchorX: 0
 
   Process {
     id: clientsProcess
@@ -76,11 +89,32 @@ PanelWindow {
     atomicWrites: true
   }
 
+  // Written by bin/quickshelldock-pin, never by the dock. Watching it is what
+  // makes a pin from the Omarchy menu show up without a restart.
+  FileView {
+    id: pinsFile
+    path: root.pinsPath
+    blockLoading: true
+    printErrors: false
+    watchChanges: true
+    // reload() is async, so the merge has to wait for the text to actually
+    // land rather than reading it back on the fileChanged tick.
+    onFileChanged: reload()
+    onTextChanged: {
+      root.loadPins()
+      if (!root.dragging) root.rebuildModel()
+    }
+  }
+
 
   ListModel { id: appModel }
 
-  function normalizeApp(app) {
+  function normalizeApp(app, pinned) {
     return {
+      // Desktop entry id, only present on pinned apps. It is the key the
+      // pin tool unpins by.
+      entryId: app.id ?? "",
+      pinned: pinned === true,
       name: app.name ?? "",
       icon: app.icon ?? "",
       cmd: app.cmd ?? "",
@@ -89,6 +123,15 @@ PanelWindow {
       appId: app.appId ?? "",
       minimizable: app.minimizable !== false,
       order: app.order ?? 0,
+    }
+  }
+
+  function loadPins() {
+    try {
+      const raw = pinsFile.text()
+      pinnedApps = raw ? (JSON.parse(raw) || []) : []
+    } catch (e) {
+      pinnedApps = []
     }
   }
 
@@ -105,8 +148,23 @@ PanelWindow {
   // Apps added to the config after the last drag land at the end.
   function rebuildModel() {
     let apps = []
-    for (const app of DockApps.apps) apps.push(normalizeApp(app))
+    for (const app of DockApps.apps) apps.push(normalizeApp(app, false))
     apps.sort((a, b) => a.order - b.order)
+
+    // Pins append after the configured apps. An app already declared in
+    // UserConfig.qml wins, so pinning something that is already on the dock
+    // is a no-op rather than a duplicate icon.
+    for (const pin of pinnedApps) {
+      const entry = normalizeApp(pin, true)
+      let duplicate = false
+      for (const app of apps) {
+        if (app.name === entry.name || (app.cmd && app.cmd === entry.cmd)) {
+          duplicate = true
+          break
+        }
+      }
+      if (!duplicate) apps.push(entry)
+    }
 
     if (savedOrder.length > 0) {
       let byName = {}
@@ -226,6 +284,29 @@ PanelWindow {
     return results
   }
 
+  function openContextMenu(item) {
+    if (root.contextOpen && root.contextName === item.name) {
+      root.closeContextMenu()
+      return
+    }
+    root.contextName = item.name
+    root.contextId = item.entryId
+    root.contextPinned = item.pinned
+    root.contextAnchorX = dockBar.mapFromItem(item, item.width / 2, 0).x
+    root.contextOpen = true
+  }
+
+  function closeContextMenu() {
+    root.contextOpen = false
+  }
+
+  function unpinContext() {
+    if (!root.contextPinned || !root.contextId) return
+    // The CLI owns pins.json; the watcher above picks the change back up.
+    Quickshell.execDetached([root.pinTool, "--unpin", root.contextId])
+    root.closeContextMenu()
+  }
+
   function showDockBar() {
     hideTimer.stop()
     dockVisible = true
@@ -235,6 +316,8 @@ PanelWindow {
     if (!workspaceEmpty) hideTimer.restart()
   }
 
+  onMouseOverDockAreaChanged: mouseOverDockArea ? contextCloseTimer.stop() : contextCloseTimer.restart()
+
   onWorkspaceEmptyChanged: {
     if (workspaceEmpty) showDockBar()
     else scheduleHide()
@@ -242,6 +325,7 @@ PanelWindow {
 
   Component.onCompleted: {
     loadSavedOrder()
+    loadPins()
     rebuildModel()
     updateWorkspaceEmpty()
   }
@@ -289,7 +373,7 @@ PanelWindow {
     interval: 0
     repeat: false
     onTriggered: {
-      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging) return
+      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging || root.contextOpen) return
       root.dockVisible = false
     }
   }
@@ -344,6 +428,8 @@ PanelWindow {
           id: appItem
 
           required property int index
+          required property string entryId
+          required property bool pinned
           required property string name
           required property string icon
           required property string cmd
@@ -425,11 +511,21 @@ PanelWindow {
           }
 
           TapHandler {
+            acceptedButtons: Qt.RightButton
+            gesturePolicy: TapHandler.ReleaseWithinBounds
+            onSingleTapped: root.openContextMenu(appItem)
+          }
+
+          TapHandler {
             acceptedButtons: Qt.LeftButton
             // Releases the press to the DragHandler once the pointer moves
             // past the drag threshold, so a drag never fires a launch.
             gesturePolicy: TapHandler.DragThreshold
             onSingleTapped: {
+              if (root.contextOpen) {
+                root.closeContextMenu()
+                return
+              }
               var cmdParts = appItem.cmd.split(/\s+/)
               if (appItem.isRunning) {
                 var minimizable = appItem.minimizable
@@ -561,6 +657,84 @@ PanelWindow {
               font.pixelSize: 10
               font.bold: true
             }
+          }
+        }
+      }
+    }
+  }
+
+  Timer {
+    id: contextCloseTimer
+    interval: 180
+    repeat: false
+    onTriggered: if (!root.mouseOverDockArea) root.closeContextMenu()
+  }
+
+  Item {
+    id: contextMenu
+
+    // Collapsed to nothing when closed so it contributes no input region.
+    width: root.contextOpen ? contextCard.width : 0
+    height: root.contextOpen ? contextCard.height : 0
+    visible: root.contextOpen
+
+    anchors.bottom: dockBar.top
+    anchors.bottomMargin: 2
+    x: Math.max(0, Math.min(dockBar.x + root.contextAnchorX - width / 2, root.width - width))
+
+    HoverHandler { id: contextHover }
+
+    Rectangle {
+      id: contextCard
+
+      implicitWidth: Math.max(150, nameText.implicitWidth + 20, actionText.implicitWidth + 24)
+      implicitHeight: contextColumn.implicitHeight + 16
+
+      color: "#1e1e2e"
+      radius: 10
+      border.color: "#313244"
+      border.width: 1
+
+      Column {
+        id: contextColumn
+        anchors.centerIn: parent
+        spacing: 2
+
+        Text {
+          id: nameText
+          text: root.contextName
+          color: "#cdd6f4"
+          opacity: 0.55
+          font.pixelSize: 11
+          font.bold: true
+          leftPadding: 8
+          bottomPadding: 2
+        }
+
+        Rectangle {
+          width: contextCard.width - 8
+          height: 26
+          radius: 6
+          color: unpinHover.hovered && root.contextPinned ? "#313244" : "transparent"
+
+          HoverHandler { id: unpinHover }
+
+          TapHandler {
+            enabled: root.contextPinned
+            acceptedButtons: Qt.LeftButton
+            onSingleTapped: root.unpinContext()
+          }
+
+          Text {
+            id: actionText
+            anchors.verticalCenter: parent.verticalCenter
+            x: 8
+            // Only apps added by the pin tool can be removed from here; the
+            // ones in UserConfig.qml are the user's own declarative config.
+            text: root.contextPinned ? "Unpin from dock" : "Set in UserConfig.qml"
+            color: "#cdd6f4"
+            opacity: root.contextPinned ? 1 : 0.4
+            font.pixelSize: 12
           }
         }
       }

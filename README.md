@@ -37,6 +37,34 @@ QtObject {
 | `appId`       | no       | If set, matches against Wayland `appId` |
 | `minimizable` | no       | Default `true`. When `false`, clicking a running app always focuses it instead of minimize/restore |
 
+## Adding apps
+
+Three ways, in increasing order of convenience.
+
+**Edit the config.** `config/UserConfig.qml` is the declarative base and hot-reloads on save. Fields come straight out
+of the app's `.desktop` file: `Icon=` → `icon`, `Exec=` → `cmd`, `StartupWMClass=` → `appId`.
+
+**Pin from the command line.**
+
+```sh
+bin/quickshelldock-pin chromium        # pin by desktop entry id
+bin/quickshelldock-pin --unpin chromium
+bin/quickshelldock-pin --list
+```
+
+It reads the `.desktop` file for you, strips launcher field codes (`%U`, `%f`, …) out of `Exec=`, and appends the app
+to `$XDG_STATE_HOME/quickshelldock/pins.json`. The dock watches that file, so the icon appears immediately. Symlink
+the script into `~/.local/bin` to have it on `PATH`.
+
+**Pin from the Omarchy menu (Super+Space).** Run `integration/install-omarchy-menu-rightclick` once, then right-click
+any app in the menu to pin or unpin it. See [`integration/`](integration/) for what that touches and how to undo it.
+Without the patch you can still add a `Dock › Pin app to dock` row to `~/.config/omarchy/extensions/omarchy-menu.jsonc`
+pointing at `quickshelldock-pin --pick`, which needs no changes to Omarchy at all.
+
+Pins layer on top of `UserConfig.qml` rather than replacing it, and an app already declared there is not duplicated.
+Right-click an icon on the dock to unpin it — apps that come from `UserConfig.qml` say so instead, since removing
+those means editing the file.
+
 ## Reordering
 
 Drag an icon sideways to move it. The remaining icons shuffle out of the way as you go, and the order is written to
