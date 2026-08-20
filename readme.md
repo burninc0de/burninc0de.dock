@@ -6,7 +6,7 @@ Tiling window managers are great when you're in the zone, but sometimes you just
 
 Built with [Quickshell](https://quickshell.outfoxxie.de/) for Hyprland. Launches your pinned apps, tracks running windows, and most importantly **gets out of your way** when you don't need it. Instead of a timer or hover toggle, hide/show is driven by what's actually on your workspace: empty workspace → dock is visible. Windows present → dock hides. Event-driven, workspace-aware.
 
-The scope is deliberately tight: no window thumbnails, no subprocess tracking, no icon rearrangement, no drag-and-drop. Just a fast launcher that knows when to be there and when to vanish.
+The scope is deliberately tight: no window thumbnails, no subprocess tracking. Just a fast launcher that knows when to be there and when to vanish — with icons you can drag into whatever order you like.
 
 ## Caveats
 
@@ -67,6 +67,7 @@ When `true`, workspaces that contain only floating windows are treated as empty 
 - **Empty workspace** &mdash; dock visible. Provides a visual shelf and one-click launchers.
 - **Workspace with windows** &mdash; dock hides. No screen real estate wasted. Hover the bottom edge to reveal.
 - **Click** &mdash; launches the app; if already running, focuses its window.
+- **Drag** &mdash; hold and drag an icon sideways to reorder the dock. The new order is saved and survives restarts.
 - **Running indicator** &mdash; small dot below the icon.
 
 The dock is there for the moments your hands aren't on the keyboard.

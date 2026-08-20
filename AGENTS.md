@@ -8,11 +8,25 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 - `DockPanel.qml` — the dock UI: auto-hide, bounce-on-launch, Hyprland toplevel matching, window focus
 - `config/DockApps.qml` — singleton defining the ordered app list (name, icon, cmd, optional `match`)
 
+## Reordering
+
+- The Repeater is backed by a `ListModel` (`appModel`), not a plain JS array — a `move()` keeps the delegates alive
+  mid-drag, whereas reassigning an array model recreates them and kills the active `DragHandler`
+- `DockApps.apps` is the baseline order; `order.json` under `Quickshell.env("XDG_STATE_HOME")` (falling back to
+  `~/.local/state`) overrides it and is rewritten on drag release
+- The dragged icon's `Translate.x` is bound to `dragPointerX - dragGrabOffset - appItem.x`. Reading the live,
+  Row-assigned `appItem.x` is what keeps the icon under the cursor when a reorder relayouts the row mid-drag
+- Pointer positions are read from `centroid.scenePosition` and mapped with `row.mapFromItem(null, ...)`;
+  `centroid.position` is self-referential once the item carries a drag transform
+- `TapHandler.gesturePolicy: DragThreshold` is what stops a drag from also launching the app
+
 ## Key conventions
 
 - App matching: if `match` is set, matches against Hyprland toplevel `title`; if `appId` is set, matches against the Wayland `appId`; otherwise extracts the binary name from `cmd` and matches against `appId` or `class`
 - `Quickshell.execDetached(cmdParts)` launches apps — always split `cmd` on whitespace
 - The dock uses `WlrLayershell.layer: Top` and `exclusiveZone: -1` (no exclusive zone)
+- Show/hide is a plain `anchors.bottomMargin` binding with no Transition, and `hideTimer.interval` is `0` — the timer
+  only exists so the triggerStrip/dockBar hover handoff doesn't flicker
 - Layer namespace is `quickshelldock`
 
 ## Dock visibility

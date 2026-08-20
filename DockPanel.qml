@@ -2,7 +2,6 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import QtQuick
-import QtQuick.Layouts
 import qs.config
 import Quickshell.Io
 
@@ -31,23 +30,29 @@ PanelWindow {
   readonly property real gap: 6
   readonly property real elevationMargin: -3
 
-  readonly property var orderedApps: {
-    let apps = []
-    for (const app of DockApps.apps) {
-      let entry = { icon: app.icon, name: app.name, cmd: app.cmd, order: app.order }
-      if (app.match) entry.match = app.match
-      if (app.appId) entry.appId = app.appId
-      if (app.minimizable !== undefined) entry.minimizable = app.minimizable
-      apps.push(entry)
-    }
-    apps.sort((a, b) => a.order - b.order)
-    return apps
-  }
+  readonly property int itemSize: 54
+  readonly property int itemSpacing: 12
+  readonly property real itemPitch: itemSize + itemSpacing
+
   property bool dockVisible: true
   property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered
   property bool workspaceEmpty: true
   property string clientsJson: ""
   property int _badgeTick: 0
+
+  // Drag-to-reorder state. Only one icon can be dragged at a time, so this
+  // lives on the root rather than in the delegates.
+  property string dragName: ""
+  property real dragPointerX: 0
+  property real dragGrabOffset: 0
+  readonly property bool dragging: dragName !== ""
+
+  // Icon order survives restarts here. Kept out of the config dir so a
+  // git pull never fights with it.
+  readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME")
+    || (Quickshell.env("HOME") + "/.local/state")) + "/quickshelldock"
+  readonly property string orderPath: stateDir + "/order.json"
+  property var savedOrder: []
 
   Process {
     id: clientsProcess
@@ -55,6 +60,87 @@ PanelWindow {
     stdout: StdioCollector {
       onStreamFinished: { root.clientsJson = this.text }
     }
+  }
+
+  Process {
+    id: mkdirProcess
+    command: ["mkdir", "-p", root.stateDir]
+    running: true
+  }
+
+  FileView {
+    id: orderFile
+    path: root.orderPath
+    blockLoading: true
+    printErrors: false
+    atomicWrites: true
+  }
+
+
+  ListModel { id: appModel }
+
+  function normalizeApp(app) {
+    return {
+      name: app.name ?? "",
+      icon: app.icon ?? "",
+      cmd: app.cmd ?? "",
+      // `match` is a reserved-ish name on the QML side, so the role is renamed.
+      matchTitle: app.match ?? "",
+      appId: app.appId ?? "",
+      minimizable: app.minimizable !== false,
+      order: app.order ?? 0,
+    }
+  }
+
+  function loadSavedOrder() {
+    try {
+      const raw = orderFile.text()
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) savedOrder = parsed
+    } catch (e) {}
+  }
+
+  // Config order is the baseline; anything the user has dragged wins over it.
+  // Apps added to the config after the last drag land at the end.
+  function rebuildModel() {
+    let apps = []
+    for (const app of DockApps.apps) apps.push(normalizeApp(app))
+    apps.sort((a, b) => a.order - b.order)
+
+    if (savedOrder.length > 0) {
+      let byName = {}
+      for (const app of apps) byName[app.name] = app
+      let sorted = []
+      for (const name of savedOrder) {
+        if (byName[name]) {
+          sorted.push(byName[name])
+          delete byName[name]
+        }
+      }
+      for (const app of apps) if (byName[app.name]) sorted.push(app)
+      apps = sorted
+    }
+
+    appModel.clear()
+    for (const app of apps) appModel.append(app)
+  }
+
+  function persistOrder() {
+    let names = []
+    for (var i = 0; i < appModel.count; i++) names.push(appModel.get(i).name)
+    savedOrder = names
+    orderFile.setText(JSON.stringify(names, null, 2) + "\n")
+  }
+
+  // Called on every pointer move during a drag: figure out which slot the
+  // dragged icon is currently over and shuffle the model if it changed.
+  function updateDragTarget(fromIndex) {
+    const desiredLeft = dragPointerX - dragGrabOffset
+    let target = Math.round(desiredLeft / itemPitch)
+    if (target < 0) target = 0
+    if (target > appModel.count - 1) target = appModel.count - 1
+    if (target !== fromIndex) appModel.move(fromIndex, target, 1)
   }
 
   function checkWorkspaceEmpty() {
@@ -154,7 +240,18 @@ PanelWindow {
     else scheduleHide()
   }
 
-  Component.onCompleted: updateWorkspaceEmpty()
+  Component.onCompleted: {
+    loadSavedOrder()
+    rebuildModel()
+    updateWorkspaceEmpty()
+  }
+
+  Connections {
+    target: DockApps
+    function onAppsChanged() {
+      if (!root.dragging) root.rebuildModel()
+    }
+  }
 
   Connections {
     target: Hyprland
@@ -185,12 +282,14 @@ PanelWindow {
     }
   }
 
+  // Zero interval: the hide is immediate, the timer only exists so the
+  // handoff between triggerStrip and dockBar hover doesn't flicker.
   Timer {
     id: hideTimer
-    interval: 500
+    interval: 0
     repeat: false
     onTriggered: {
-      if (root.workspaceEmpty || root.mouseOverDockArea) return
+      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging) return
       root.dockVisible = false
     }
   }
@@ -199,7 +298,10 @@ PanelWindow {
     id: dockBar
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.bottom: parent.bottom
-    anchors.bottomMargin: root.gap - root.dockHeight - 20
+    // No transition: show/hide snaps to position.
+    anchors.bottomMargin: root.dockVisible
+      ? root.elevationMargin + root.gap
+      : root.gap - root.dockHeight - 20
 
     implicitWidth: row.implicitWidth + 24
     implicitHeight: row.implicitHeight + 24
@@ -208,23 +310,6 @@ PanelWindow {
     radius: 18
     border.color: "#313244"
     border.width: 1
-
-    states: State {
-      name: "visible"
-      when: root.dockVisible
-      PropertyChanges {
-        target: dockBar
-        anchors.bottomMargin: root.elevationMargin + root.gap
-      }
-    }
-
-    transitions: Transition {
-      NumberAnimation {
-        property: "anchors.bottomMargin"
-        duration: 200
-        easing.type: Easing.InOutQuad
-      }
-    }
 
     Rectangle {
       anchors.fill: parent
@@ -240,22 +325,57 @@ PanelWindow {
       onHoveredChanged: hovered ? hideTimer.stop() : root.scheduleHide()
     }
 
-    RowLayout {
+    Row {
       id: row
       anchors.centerIn: parent
-      spacing: 12
+      spacing: root.itemSpacing
+
+      // Icons displaced by a drag slide to their new slot. Set duration to 0
+      // for fully instant reordering.
+      move: Transition {
+        NumberAnimation { properties: "x"; duration: 120; easing.type: Easing.OutCubic }
+      }
 
       Repeater {
         id: appRepeater
-        model: root.orderedApps
+        model: appModel
 
         delegate: Item {
-          implicitWidth: 54
-          implicitHeight: 54
+          id: appItem
+
+          required property int index
+          required property string name
+          required property string icon
+          required property string cmd
+          required property string matchTitle
+          required property string appId
+          required property bool minimizable
+
+          readonly property var appData: ({
+            name: appItem.name,
+            icon: appItem.icon,
+            cmd: appItem.cmd,
+            match: appItem.matchTitle,
+            appId: appItem.appId,
+            minimizable: appItem.minimizable,
+          })
+
+          readonly property bool isDragged: root.dragName === appItem.name
+
+          width: root.itemSize
+          height: root.itemSize
+          z: isDragged ? 10 : 0
+
+          // Glued to the pointer while dragged. Because this reads appItem.x,
+          // it re-solves whenever the Row re-lays the icon out mid-drag, so
+          // the icon stays under the cursor through a reorder.
+          transform: Translate {
+            x: appItem.isDragged ? root.dragPointerX - root.dragGrabOffset - appItem.x : 0
+          }
 
           property bool busy: false
 
-          readonly property var toplevels: root.getToplevelsForApp(modelData)
+          readonly property var toplevels: root.getToplevelsForApp(appItem.appData)
           readonly property bool isRunning: toplevels.length > 0
           readonly property int pid: isRunning ? toplevels[0].pid : 0
           readonly property int unreadCount: {
@@ -273,29 +393,59 @@ PanelWindow {
             anchors.margins: 2
             radius: 12
             color: "#cdd6f4"
-            opacity: itemHover.hovered ? 0.15 : 0
+            opacity: appItem.isDragged ? 0.22 : (itemHover.hovered ? 0.15 : 0)
             Behavior on opacity { NumberAnimation { duration: 150 } }
+          }
+
+          DragHandler {
+            id: dragHandler
+            target: null
+            yAxis.enabled: false
+
+            onActiveChanged: {
+              if (active) {
+                hideTimer.stop()
+                const p = row.mapFromItem(null, centroid.scenePosition.x, centroid.scenePosition.y)
+                root.dragPointerX = p.x
+                root.dragGrabOffset = p.x - appItem.x
+                root.dragName = appItem.name
+              } else {
+                root.dragName = ""
+                root.persistOrder()
+                if (!root.mouseOverDockArea) root.scheduleHide()
+              }
+            }
+
+            onCentroidChanged: {
+              if (!active) return
+              const p = row.mapFromItem(null, centroid.scenePosition.x, centroid.scenePosition.y)
+              root.dragPointerX = p.x
+              root.updateDragTarget(appItem.index)
+            }
           }
 
           TapHandler {
             acceptedButtons: Qt.LeftButton
+            // Releases the press to the DragHandler once the pointer moves
+            // past the drag threshold, so a drag never fires a launch.
+            gesturePolicy: TapHandler.DragThreshold
             onSingleTapped: {
-              var cmdParts = modelData.cmd.split(/\s+/)
-              if (isRunning) {
-                var minimizable = modelData.minimizable !== false
+              var cmdParts = appItem.cmd.split(/\s+/)
+              if (appItem.isRunning) {
+                var minimizable = appItem.minimizable
                 if (minimizable) {
                   var anyOnCurrent = false
                   var anyOnSpecial = false
                   var ws = Hyprland.focusedWorkspace?.id
-                  for (var _i = 0; _i < toplevels.length; _i++) {
-                    var tws = toplevels[_i].toplevel.workspace?.id
+                  for (var _i = 0; _i < appItem.toplevels.length; _i++) {
+                    var tws = appItem.toplevels[_i].toplevel.workspace?.id
                     if (tws === ws) anyOnCurrent = true
                     if (tws != null && tws < 0) anyOnSpecial = true
                   }
 
                   if (anyOnCurrent) {
-                    for (var _j = 0; _j < toplevels.length; _j++) {
-                      var tl = toplevels[_j].toplevel
+                    for (var _j = 0; _j < appItem.toplevels.length; _j++) {
+                      var tl = appItem.toplevels[_j].toplevel
                       if (tl.workspace?.id !== ws) continue
                       var addr = tl.lastIpcObject?.address
                       if (!addr || addr === "0") addr = "0x" + tl.address
@@ -308,8 +458,8 @@ PanelWindow {
                   }
 
                   if (anyOnSpecial) {
-                    for (var _k = 0; _k < toplevels.length; _k++) {
-                      var tl = toplevels[_k].toplevel
+                    for (var _k = 0; _k < appItem.toplevels.length; _k++) {
+                      var tl = appItem.toplevels[_k].toplevel
                       if (tl.workspace?.id == null || tl.workspace.id >= 0) continue
                       var addr = tl.lastIpcObject?.address
                       if (!addr || addr === "0") addr = "0x" + tl.address
@@ -317,29 +467,29 @@ PanelWindow {
                         Hyprland.dispatch('hl.dsp.window.move({ workspace = ' + (ws ?? 1) + ', window = "address:' + addr + '" })')
                       }
                     }
-                    var addr = toplevels[0].toplevel.lastIpcObject?.address
-                    if (!addr || addr === "0") addr = "0x" + toplevels[0].toplevel.address
+                    var addr = appItem.toplevels[0].toplevel.lastIpcObject?.address
+                    if (!addr || addr === "0") addr = "0x" + appItem.toplevels[0].toplevel.address
                     if (addr && addr !== "0x0") {
                       Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
                     } else {
-                      var cls = toplevels[0].toplevel.lastIpcObject?.class
+                      var cls = appItem.toplevels[0].toplevel.lastIpcObject?.class
                       if (cls) Hyprland.dispatch('hl.dsp.focus({ window = "class:' + cls + '" })')
                     }
                     return
                   }
                 }
 
-                var addr = toplevels[0].toplevel.lastIpcObject?.address
-                if (!addr || addr === "0") addr = "0x" + toplevels[0].toplevel.address
+                var addr = appItem.toplevels[0].toplevel.lastIpcObject?.address
+                if (!addr || addr === "0") addr = "0x" + appItem.toplevels[0].toplevel.address
                 if (addr && addr !== "0x0") {
                   Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
                 } else {
-                  var cls = toplevels[0].toplevel.lastIpcObject?.class
+                  var cls = appItem.toplevels[0].toplevel.lastIpcObject?.class
                   if (cls) Hyprland.dispatch('hl.dsp.focus({ window = "class:' + cls + '" })')
                 }
                 if (!root.workspaceEmpty) root.dockVisible = false
-              } else if (!busy) {
-                busy = true
+              } else if (!appItem.busy) {
+                appItem.busy = true
                 bounceAnimation.start()
                 Quickshell.execDetached(cmdParts)
               }
@@ -372,25 +522,26 @@ PanelWindow {
           Image {
             id: iconImg
             anchors.centerIn: parent
-            source: Quickshell.iconPath(modelData.icon, true)
+            source: Quickshell.iconPath(appItem.icon, true)
             width: 40
             height: 40
             fillMode: Image.PreserveAspectFit
+            opacity: appItem.isDragged ? 0.85 : 1
           }
 
           Rectangle {
-            visible: isRunning
+            visible: appItem.isRunning
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
             anchors.bottomMargin: -6
             width: 4
             height: 4
-            radius: 2 
+            radius: 2
             color: "#ffffff"
           }
 
           Rectangle {
-            visible: unreadCount > 0
+            visible: appItem.unreadCount > 0
             anchors.top: parent.top
             anchors.topMargin: -4
             anchors.right: parent.right
@@ -405,7 +556,7 @@ PanelWindow {
             Text {
               id: badgeText
               anchors.centerIn: parent
-              text: unreadCount > 99 ? "99+" : unreadCount.toString()
+              text: appItem.unreadCount > 99 ? "99+" : appItem.unreadCount.toString()
               color: "#ffffff"
               font.pixelSize: 10
               font.bold: true

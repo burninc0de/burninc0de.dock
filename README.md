@@ -37,6 +37,21 @@ QtObject {
 | `appId`       | no       | If set, matches against Wayland `appId` |
 | `minimizable` | no       | Default `true`. When `false`, clicking a running app always focuses it instead of minimize/restore |
 
+## Reordering
+
+Drag an icon sideways to move it. The remaining icons shuffle out of the way as you go, and the order is written to
+`$XDG_STATE_HOME/quickshelldock/order.json` (`~/.local/state/quickshelldock/order.json` by default) on release, so it
+survives a restart.
+
+The saved order takes priority over the `order` fields in the config. Apps added to the config afterwards are appended
+to the end of the dock; apps removed from the config are dropped. Delete `order.json` to fall back to the config order.
+
+## Show / hide
+
+Show and hide are instant — the bar snaps into place with no slide animation, both when the workspace empties and when
+you hover the bottom edge. The only easing left is the 120ms shuffle of icons displaced by a drag; set that
+`NumberAnimation` duration to `0` in `DockPanel.qml` if you want reordering to snap too.
+
 ## Minimize / Restore
 
 Since Hyprland has no native minimize, clicking a running app's dock icon hides it on the `special:dock_minimize` scratchpad workspace. Clicking again restores it to the current workspace.
