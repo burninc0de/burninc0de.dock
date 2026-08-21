@@ -7,10 +7,10 @@ QtObject {
   property bool showOnFloating: true
 
   property var apps: [
-    { name: "Firefox", icon: "firefox", cmd: "firefox", order: 0 },
-    { name: "Kitty", icon: "kitty", cmd: "kitty", order: 1 },
-    { name: "Dolphin", icon: "system-file-manager", cmd: "dolphin", order: 2 },
-    { name: "Code", icon: "code", cmd: "code", order: 3 },
+    { name: "Chromium", icon: "chromium", cmd: "chromium", appId: "chromium", order: 0 },
+    { name: "Terminal", icon: "foot", cmd: "foot", appId: "foot", order: 1 },
+    { name: "Files", icon: "system-file-manager", cmd: "nautilus", appId: "org.gnome.Nautilus", order: 2 },
+    { name: "Neovim", icon: "nvim", cmd: "foot --app-id=foot-nvim -e nvim", appId: "foot-nvim", order: 3 },
   ]
 
   Component.onCompleted: {

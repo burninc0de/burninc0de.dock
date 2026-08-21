@@ -5,27 +5,31 @@ QtObject {
 
   property var apps: [
     {
-      name: "Firefox",
-      icon: "firefox",
-      cmd: "firefox",
+      name: "Chromium",
+      icon: "chromium",
+      cmd: "chromium",
+      appId: "chromium",
       order: 0,
     },
     {
-      name: "Kitty",
-      icon: "kitty",
-      cmd: "kitty",
+      name: "Terminal",
+      icon: "foot",
+      cmd: "foot",
+      appId: "foot",
       order: 1,
     },
     {
-      name: "Dolphin",
+      name: "Files",
       icon: "system-file-manager",
-      cmd: "dolphin",
+      cmd: "nautilus",
+      appId: "org.gnome.Nautilus",
       order: 2,
     },
     {
-      name: "Code",
-      icon: "code",
-      cmd: "code",
+      name: "Neovim",
+      icon: "nvim",
+      cmd: "foot --app-id=foot-nvim -e nvim",
+      appId: "foot-nvim",
       order: 3,
     },
   ]
