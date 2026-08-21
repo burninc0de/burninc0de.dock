@@ -24,6 +24,7 @@ PanelWindow {
     Region { item: dockBar }
     Region { item: contextMenu }
     Region { item: windowMenu }
+    Region { item: pinMenu }
   }
 
   // The window only grows tall enough for the context menu while one is open;
@@ -40,7 +41,7 @@ PanelWindow {
   readonly property real itemPitch: itemSize + itemSpacing
 
   property bool dockVisible: true
-  property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered || contextHover.hovered || windowMenuHover.hovered
+  property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered || contextHover.hovered || windowMenuHover.hovered || pinMenuHover.hovered
   property bool workspaceEmpty: true
   property string clientsJson: ""
   property int _badgeTick: 0
@@ -82,6 +83,11 @@ PanelWindow {
   property string hoverMenuKey: ""
   property var hoverMenuWindows: []
   property real hoverMenuAnchorX: 0
+
+  // Right-click-on-empty-space menu: running apps not already on the dock.
+  property bool pinMenuOpen: false
+  property var pinCandidates: []
+  property real pinMenuAnchorX: 0
 
   // Matches what other docks offer: GNOME's dash-to-dock, the macOS Dock and
   // KDE's task manager all agree on new-window / pin-unpin / quit. Window
@@ -343,6 +349,7 @@ PanelWindow {
       root.closeContextMenu()
       return
     }
+    root.closePinMenu()
     // Pinned apps unpin by desktop id; config apps have none, so they unpin by
     // name and the pin tool suppresses them instead of editing UserConfig.qml.
     root.contextKey = item.entryId || item.name
@@ -354,6 +361,53 @@ PanelWindow {
 
   function closeContextMenu() {
     root.contextOpen = false
+  }
+
+  // Running apps that no dock icon claims, deduped by class/appId. A toplevel
+  // counts as claimed when any configured or pinned app matches it.
+  function buildPinCandidates() {
+    let claimed = []
+    for (let i = 0; i < appModel.count; i++) {
+      const m = appModel.get(i)
+      const tls = root.getToplevelsForApp({ match: m.matchTitle, appId: m.appId, cmd: m.cmd })
+      for (const t of tls) claimed.push(t.toplevel)
+    }
+    const seen = {}
+    const out = []
+    for (const tl of Hyprland.toplevels.values) {
+      if (claimed.indexOf(tl) >= 0) continue
+      const cls = tl.lastIpcObject?.class ?? ""
+      const aid = tl.wayland?.appId ?? ""
+      const key = cls || aid
+      if (!key || seen[key]) continue
+      seen[key] = true
+      out.push({ label: key, cls: cls, appId: aid })
+    }
+    return out
+  }
+
+  function openPinMenu(xInBar) {
+    if (root.pinMenuOpen) {
+      root.closePinMenu()
+      return
+    }
+    root.closeContextMenu()
+    root.closeHoverMenu()
+    root.pinCandidates = root.buildPinCandidates()
+    root.pinMenuAnchorX = xInBar
+    root.pinMenuOpen = true
+  }
+
+  function closePinMenu() {
+    root.pinMenuOpen = false
+  }
+
+  function runPinAction(entry) {
+    root.closePinMenu()
+    const key = entry.cls || entry.appId
+    if (!key) return
+    Quickshell.execDetached([root.pinTool, "--pin-window", key])
+    if (!root.workspaceEmpty) root.dockVisible = false
   }
 
   function runContextAction(act) {
@@ -434,9 +488,10 @@ PanelWindow {
     function onRawEvent(event) {
       if (["workspace", "workspacev2", "activewindow", "activewindowv2",
            "createworkspace", "createworkspacev2",
-           "destroyworkspace", "destroyworkspacev2"].includes(event.name)) {
+            "destroyworkspace", "destroyworkspacev2"].includes(event.name)) {
         updateWorkspaceEmpty()
         closeHoverMenu()
+        closePinMenu()
       }
       if (event.name === "windowtitle") {
         root._badgeTick++
@@ -464,7 +519,7 @@ PanelWindow {
     interval: 500
     repeat: false
     onTriggered: {
-      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging || root.contextOpen || root.hoverMenuOpen) return
+      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging || root.contextOpen || root.hoverMenuOpen || root.pinMenuOpen) return
       root.dockVisible = false
     }
   }
@@ -512,6 +567,12 @@ PanelWindow {
     HoverHandler {
       id: dockHover
       onHoveredChanged: hovered ? hideTimer.stop() : root.scheduleHide()
+    }
+
+    TapHandler {
+      acceptedButtons: Qt.RightButton
+      gesturePolicy: TapHandler.ReleaseWithinBounds
+      onSingleTapped: root.openPinMenu(point.position.x)
     }
 
     Row {
@@ -579,7 +640,7 @@ PanelWindow {
             id: itemHover
             onHoveredChanged: {
               if (hovered) {
-                if (appItem.toplevels.length >= 2 && !root.contextOpen) {
+                if (appItem.toplevels.length >= 2 && !root.contextOpen && !root.pinMenuOpen) {
                   root.hoverMenuKey = appItem.name
                   root.hoverMenuWindows = appItem.toplevels.map(t => ({
                     title: t.toplevel.title || appItem.name,
@@ -800,7 +861,7 @@ PanelWindow {
     interval: 300
     repeat: false
     onTriggered: {
-      if (!root.contextOpen) root.hoverMenuOpen = true
+      if (!root.contextOpen && !root.pinMenuOpen) root.hoverMenuOpen = true
     }
   }
 
@@ -967,6 +1028,95 @@ PanelWindow {
           }
           return longest
         }
+        font.pixelSize: 12
+      }
+    }
+  }
+
+  Item {
+    id: pinMenu
+
+    width: root.pinMenuOpen ? pinCard.width : 0
+    height: root.pinMenuOpen ? pinCard.height : 0
+    visible: root.pinMenuOpen
+
+    anchors.bottom: dockBar.top
+    anchors.bottomMargin: 2
+    x: Math.max(0, Math.min(dockBar.x + root.pinMenuAnchorX - width / 2, root.width - width))
+
+    HoverHandler { id: pinMenuHover }
+
+    Rectangle {
+      id: pinCard
+
+      // +26 leaves room for the icon column; capped like the other cards so
+      // long class names elide instead of stretching the menu.
+      implicitWidth: Math.max(150, Math.min(pinWidthProbe.implicitWidth + 24 + 26, 320))
+      implicitHeight: pinColumn.implicitHeight + 16
+
+      color: "#1e1e2e"
+      radius: 10
+      border.color: "#313244"
+      border.width: 1
+
+      Column {
+        id: pinColumn
+        anchors.centerIn: parent
+        spacing: 1
+
+        Repeater {
+          model: root.pinCandidates.length > 0
+            ? root.pinCandidates
+            : [{ label: "No unpinned apps running", empty: true }]
+
+          delegate: Rectangle {
+            required property var modelData
+
+            width: pinCard.width - 8
+            height: 26
+            radius: 6
+            color: !modelData.empty && pinRowHover.hovered ? "#313244" : "transparent"
+
+            HoverHandler { id: pinRowHover }
+
+            TapHandler {
+              acceptedButtons: Qt.LeftButton
+              enabled: !modelData.empty
+              onSingleTapped: root.runPinAction(modelData)
+            }
+
+            Row {
+              anchors.verticalCenter: parent.verticalCenter
+              x: 8
+              spacing: 8
+
+              Image {
+                source: modelData.empty ? "" : Quickshell.iconPath(modelData.cls || modelData.appId, true)
+                width: 16
+                height: 16
+                visible: !modelData.empty
+                anchors.verticalCenter: parent.verticalCenter
+                fillMode: Image.PreserveAspectFit
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: modelData.label
+                color: modelData.empty ? "#6c7086" : "#cdd6f4"
+                font.pixelSize: 12
+                elide: Text.ElideRight
+                // Card width minus row inset, icon, spacing and margins.
+                width: pinCard.width - 48
+              }
+            }
+          }
+        }
+      }
+
+      Text {
+        id: pinWidthProbe
+        visible: false
+        text: "No unpinned apps running"
         font.pixelSize: 12
       }
     }

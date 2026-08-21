@@ -153,6 +153,56 @@ unpin() {
   notify "Removed from dock" "$key"
 }
 
+# A running window only knows its class/appId, not its desktop entry. Find
+# whichever entry claims that class: StartupWMClass beats an Exec basename
+# match, XDG order breaks remaining ties.
+find_desktop_for_window() {
+  local key="${1,,}" dir file wm exec_bin
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      wm=$(entry_key "$file" StartupWMClass)
+      [[ $wm == *@@* || $wm == *%* ]] && wm=""
+      [[ ${wm,,} == "$key" ]] && { basename "$file" .desktop; return 0; }
+    done
+  done < <(desktop_dirs)
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      exec_bin=$(entry_key "$file" Exec | awk '{print $1}' | sed 's:.*/::')
+      [[ ${exec_bin,,} == "$key" ]] && { basename "$file" .desktop; return 0; }
+    done
+  done < <(desktop_dirs)
+  return 1
+}
+
+# Dock-menu path: pin straight from a running window. Native Wayland apps
+# often report an app-id equal to their desktop file id, so try that first,
+# then whichever entry claims the class via StartupWMClass/Exec. Otherwise
+# pin blind, which works whenever the binary is on PATH.
+pin_window() {
+  local key="$1" id
+
+  # The app-id often IS a desktop id (native Wayland apps), which pin()
+  # resolves itself. Otherwise claim-by-class, else blind.
+  if find_desktop "$key" >/dev/null 2>&1; then
+    pin "$key"
+  elif id=$(find_desktop_for_window "$key"); then
+    pin "$id"
+  else
+    is_pinned "$key" && { echo "already pinned: $key"; return 0; }
+    read_pins | jq \
+      --arg id "$key" --arg name "$key" --arg icon "$key" \
+      --arg cmd "$key" --arg appId "$key" \
+      '. + [{ id: $id, name: $name, icon: $icon, cmd: $cmd, appId: $appId }]' \
+      | write_pins
+    unhide "$key"
+    notify "Pinned to dock" "$key"
+  fi
+}
+
 restore() {
   local key="$1"
   read_hidden | jq -e --arg k "$key" 'index([$k])' >/dev/null 2>&1 || die "not hidden: $key"
@@ -251,6 +301,7 @@ usage() {
   cat <<'USAGE'
 Usage: quickshelldock-pin <desktop-id>          Pin an app
        quickshelldock-pin --unpin <id|name>     Unpin an app
+       quickshelldock-pin --pin-window <class>  Pin a running window's app by class/appId
        quickshelldock-pin --toggle <desktop-id> Pin if absent, unpin if present
        quickshelldock-pin --pick                Choose an app to pin (Omarchy menu)
        quickshelldock-pin --unpick              Choose an app to unpin (Omarchy menu)
@@ -273,6 +324,7 @@ case "${1-}" in
   --restore) [[ -n ${2-} ]] || die "--restore needs a name"; restore "$2" ;;
   --pinned) [[ -n ${2-} ]] || die "--pinned needs a desktop id"; is_pinned "$2" ;;
   --unpin) [[ -n ${2-} ]] || die "--unpin needs a desktop id"; unpin "$2" ;;
+  --pin-window) [[ -n ${2-} ]] || die "--pin-window needs a window class or appId"; pin_window "$2" ;;
   --toggle) [[ -n ${2-} ]] || die "--toggle needs a desktop id"; toggle "$2" ;;
   --pick) pick ;;
   --unpick) unpick ;;
