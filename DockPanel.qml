@@ -2,6 +2,7 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import QtQuick
+import qs.Commons
 import "config"
 import Quickshell.Io
 
@@ -536,9 +537,9 @@ PanelWindow {
     implicitWidth: row.implicitWidth + 24
     implicitHeight: row.implicitHeight + 24
 
-    color: "#1e1e2e"
+    color: Color.bar.background
     radius: 18
-    border.color: "#313244"
+    border.color: Qt.alpha(Color.foreground, 0.18)
     border.width: 1
 
     states: State {
@@ -662,7 +663,7 @@ PanelWindow {
             anchors.fill: parent
             anchors.margins: 2
             radius: 12
-            color: "#cdd6f4"
+            color: Color.foreground
             opacity: appItem.isDragged ? 0.22 : (itemHover.hovered ? 0.15 : 0)
             Behavior on opacity { NumberAnimation { duration: 150 } }
           }
@@ -822,7 +823,7 @@ PanelWindow {
             width: 4
             height: 4
             radius: 2
-            color: "#ffffff"
+            color: Color.bar.text
           }
 
           Rectangle {
@@ -835,7 +836,7 @@ PanelWindow {
             height: 18
             radius: 9
             color: "#ea4335"
-            border.color: "#1e1e2e"
+            border.color: Color.bar.background
             border.width: 1.5
 
             Text {
@@ -903,9 +904,9 @@ PanelWindow {
       implicitWidth: Math.max(150, widthProbe.implicitWidth + 24)
       implicitHeight: contextColumn.implicitHeight + 16
 
-      color: "#1e1e2e"
+      color: Color.menu.background
       radius: 10
-      border.color: "#313244"
+      border.color: Qt.alpha(Color.foreground, 0.18)
       border.width: 1
 
       Column {
@@ -922,7 +923,7 @@ PanelWindow {
             width: contextCard.width - 8
             height: 26
             radius: 6
-            color: rowHover.hovered ? "#313244" : "transparent"
+            color: rowHover.hovered ? Color.menu.selectedBackground : "transparent"
 
             HoverHandler { id: rowHover }
 
@@ -935,7 +936,7 @@ PanelWindow {
               anchors.verticalCenter: parent.verticalCenter
               x: 8
               text: modelData.label
-              color: "#cdd6f4"
+              color: Color.menu.text
               font.pixelSize: 12
             }
           }
@@ -974,9 +975,9 @@ PanelWindow {
       implicitWidth: Math.max(150, Math.min(windowWidthProbe.implicitWidth + 24, 320))
       implicitHeight: windowColumn.implicitHeight + 16
 
-      color: "#1e1e2e"
+      color: Color.menu.background
       radius: 10
-      border.color: "#313244"
+      border.color: Qt.alpha(Color.foreground, 0.18)
       border.width: 1
 
       Column {
@@ -993,7 +994,7 @@ PanelWindow {
             width: windowCard.width - 8
             height: 26
             radius: 6
-            color: windowRowHover.hovered ? "#313244" : "transparent"
+            color: windowRowHover.hovered ? Color.menu.selectedBackground : "transparent"
 
             HoverHandler { id: windowRowHover }
 
@@ -1010,7 +1011,7 @@ PanelWindow {
               anchors.verticalCenter: parent.verticalCenter
               x: 8
               text: modelData.title
-              color: "#cdd6f4"
+              color: Color.menu.text
               font.pixelSize: 12
               elide: Text.ElideRight
               width: parent.width - 16
@@ -1057,9 +1058,9 @@ PanelWindow {
       implicitWidth: Math.max(150, Math.min(pinWidthProbe.implicitWidth + 24 + 42, 320))
       implicitHeight: pinColumn.implicitHeight + 16
 
-      color: "#1e1e2e"
+      color: Color.menu.background
       radius: 10
-      border.color: "#313244"
+      border.color: Qt.alpha(Color.foreground, 0.18)
       border.width: 1
 
       Column {
@@ -1078,7 +1079,7 @@ PanelWindow {
             width: pinCard.width - 8
             height: 26
             radius: 6
-            color: !modelData.empty && pinRowHover.hovered ? "#313244" : "transparent"
+            color: !modelData.empty && pinRowHover.hovered ? Color.menu.selectedBackground : "transparent"
 
             HoverHandler { id: pinRowHover }
 
@@ -1105,7 +1106,7 @@ PanelWindow {
               Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.label
-                color: modelData.empty ? "#6c7086" : "#cdd6f4"
+                color: modelData.empty ? Color.muted : Color.menu.text
                 font.pixelSize: 12
                 elide: Text.ElideRight
                 // Reserve room for the pin glyph only on pinnable rows; the
@@ -1120,7 +1121,7 @@ PanelWindow {
               anchors.verticalCenter: parent.verticalCenter
               // Same glyph the pin tool uses for its notifications.
               text: "󰐃"
-              color: pinRowHover.hovered ? "#cdd6f4" : "#6c7086"
+              color: pinRowHover.hovered ? Color.menu.text : Color.muted
               font.pixelSize: 13
               visible: !modelData.empty
             }
