@@ -10,7 +10,9 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 
 ## Pinning
 
-- `bin/quickshelldock-pin` is the only writer of `pins.json`; the dock shells out to it (via `Quickshell.shellDir`)
+- `bin/quickshelldock-pin` is the only writer of `pins.json`; the dock shells out to it (path resolved with
+  `Qt.resolvedUrl` relative to `DockPanel.qml` — `Quickshell.shellDir` points at omarchy-shell's own dir when loaded
+  as a plugin, not at the plugin folder)
   rather than editing the file itself, so there is one code path for pin state
 - `FileView.reload()` is async — merge pins on `onTextChanged`, not on `onFileChanged`, or you read back stale text
   and the dock silently ignores the change

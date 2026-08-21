@@ -59,7 +59,13 @@ PanelWindow {
   readonly property string orderPath: stateDir + "/order.json"
   readonly property string pinsPath: stateDir + "/pins.json"
   readonly property string hiddenPath: stateDir + "/hidden.json"
-  readonly property string pinTool: Quickshell.shellDir + "/bin/quickshelldock-pin"
+  // Resolved relative to this file, NOT Quickshell.shellDir: Omarchy loads
+  // plugins into its own shell instance, so shellDir points at
+  // /usr/share/omarchy/shell and every execDetached would silently no-op.
+  readonly property string pinTool: {
+    const u = Qt.resolvedUrl("./bin/quickshelldock-pin").toString()
+    return decodeURIComponent(u.replace(/^file:\/\//, ""))
+  }
   property var savedOrder: []
   property var pinnedApps: []
   property var hiddenApps: []
