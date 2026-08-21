@@ -24,6 +24,9 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 - The context menu passes `entryId || name` as the unpin key, so config apps (which have no desktop id) key by name
 - Desktop ids are stored without the `.desktop` suffix but must not be blindly stripped — `org.telegram.desktop` is a
   real id
+- The empty-space pin menu lists toplevels no dock app claims, deduped by class/appId; `--pin-window` resolves a
+  class back to a desktop entry by file id, then `StartupWMClass`, then `Exec` basename, and pins blind (cmd = class)
+  when nothing claims it
 
 ## Reordering
 

@@ -1052,9 +1052,9 @@ PanelWindow {
     Rectangle {
       id: pinCard
 
-      // +26 leaves room for the icon column; capped like the other cards so
-      // long class names elide instead of stretching the menu.
-      implicitWidth: Math.max(150, Math.min(pinWidthProbe.implicitWidth + 24 + 26, 320))
+      // +42 covers the app-icon column and the right-aligned pin glyph;
+      // capped like the other cards so long names elide instead of stretching.
+      implicitWidth: Math.max(150, Math.min(pinWidthProbe.implicitWidth + 24 + 42, 320))
       implicitHeight: pinColumn.implicitHeight + 16
 
       color: "#1e1e2e"
@@ -1108,9 +1108,21 @@ PanelWindow {
                 color: modelData.empty ? "#6c7086" : "#cdd6f4"
                 font.pixelSize: 12
                 elide: Text.ElideRight
-                // Card width minus row inset, icon, spacing and margins.
-                width: pinCard.width - 48
+                // Reserve room for the pin glyph only on pinnable rows; the
+                // empty-state row has no icon column either.
+                width: modelData.empty ? pinCard.width - 40 : pinCard.width - 64
               }
+            }
+
+            Text {
+              anchors.right: parent.right
+              anchors.rightMargin: 8
+              anchors.verticalCenter: parent.verticalCenter
+              // Same glyph the pin tool uses for its notifications.
+              text: "󰐃"
+              color: pinRowHover.hovered ? "#cdd6f4" : "#6c7086"
+              font.pixelSize: 13
+              visible: !modelData.empty
             }
           }
         }

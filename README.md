@@ -85,7 +85,7 @@ When `true`, workspaces that contain only floating windows are treated as empty 
 
 ## Adding apps
 
-Three ways, in increasing order of convenience.
+Four ways, in increasing order of convenience.
 
 **Edit the config.** `config/UserConfig.qml` is the declarative base and hot-reloads on save.
 
@@ -106,6 +106,12 @@ any app in the menu to pin or unpin it. See [`integration/`](integration/) for w
 Without the patch you can still add a `Dock › Pin app to dock` row to `~/.config/omarchy/extensions/omarchy-menu.jsonc`
 pointing at `quickshelldock-pin --pick`, which needs no changes to Omarchy at all.
 
+**Pin straight from the dock.** Right-click any empty spot on the bar: every running app that isn't on the dock yet
+shows up in a small list — click one to pin it. Under the hood this uses `--pin-window`, which resolves the window's
+class/appId back to a desktop entry (by file id, `StartupWMClass` or `Exec` basename) so the pinned icon launches
+properly. A fresh install therefore needs no config editing at all: defaults ship in, everything else is
+right-click pin/unpin.
+
 Pins layer on top of `UserConfig.qml` rather than replacing it, and an app already declared there is not duplicated.
 
 ## Right-click menu
@@ -120,6 +126,9 @@ and KDE's task manager all share them:
 | Unpin from dock | always |
 
 Window lists, thumbnails and "App Details" are deliberately absent — they belong to the scope this dock doesn't have.
+
+Right-clicking an **empty spot on the bar** instead of an icon opens a different menu: running apps that aren't
+pinned yet, ready to be pinned (see [Adding apps](#adding-apps)).
 
 Unpin works on every icon, wherever it came from. Apps pinned with the tool are dropped from `pins.json`; apps
 declared in `UserConfig.qml` are recorded in `hidden.json` instead, because rewriting your hand-written QML isn't the
