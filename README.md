@@ -68,7 +68,6 @@ Copy `config/UserConfig.example.qml` to `config/UserConfig.qml` and edit it to c
 | `name`        | yes      | Display name |
 | `icon`        | yes      | Icon name (theme) or absolute path to an image |
 | `cmd`         | yes      | Shell command to launch (split on whitespace; arguments with spaces aren't supported) |
-| `order`       | yes      | Sort position in the dock |
 | `match`       | no       | Match running windows by title substring |
 | `appId`       | no       | Match running windows by Wayland appId |
 | `minimizable` | no       | Default `true`. When `false`, clicking a running app always focuses it instead of minimize/restore |
@@ -156,8 +155,9 @@ Drag an icon sideways to move it. The remaining icons shuffle out of the way as 
 `$XDG_STATE_HOME/quickshelldock/order.json` (`~/.local/state/quickshelldock/order.json` by default) on release, so it
 survives a restart.
 
-The saved order takes priority over the `order` fields in the config. Apps added to the config afterwards are appended
-to the end of the dock; apps removed from the config are dropped. Delete `order.json` to fall back to the config order.
+The saved order takes priority over the order apps are declared in the config. Apps added to the config afterwards
+are appended to the end of the dock; apps removed from the config are dropped. Delete `order.json` to fall back to
+the config order.
 
 ## Show / hide
 

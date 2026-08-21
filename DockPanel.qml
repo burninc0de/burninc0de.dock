@@ -170,7 +170,6 @@ PanelWindow {
       matchTitle: app.match ?? "",
       appId: app.appId ?? "",
       minimizable: app.minimizable !== false,
-      order: app.order ?? 0,
     }
   }
 
@@ -201,12 +200,12 @@ PanelWindow {
     } catch (e) {}
   }
 
-  // Config order is the baseline; anything the user has dragged wins over it.
-  // Apps added to the config after the last drag land at the end.
+  // Declaration order in the config is the baseline; anything the user has
+  // dragged wins over it. Apps added to the config after the last drag land
+  // at the end.
   function rebuildModel() {
     let apps = []
     for (const app of DockApps.apps) apps.push(normalizeApp(app, false))
-    apps.sort((a, b) => a.order - b.order)
 
     // Pins append after the configured apps. An app already declared in
     // UserConfig.qml wins, so pinning something that is already on the dock
