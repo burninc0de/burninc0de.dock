@@ -428,6 +428,9 @@ PanelWindow {
     } else if (act === "unpin" && root.contextKey) {
       // The CLI owns pins.json and hidden.json; the watchers pick the change up.
       Quickshell.execDetached([root.pinTool, "--unpin", root.contextKey])
+      // The icon is gone and the pointer sits on now-empty bar; without this
+      // the hover handoff keeps the dock up indefinitely.
+      if (!root.workspaceEmpty) root.dockVisible = false
     }
   }
 
