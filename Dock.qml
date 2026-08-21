@@ -1,7 +1,7 @@
 import Quickshell
 import QtQuick
 
-ShellRoot {
+Item {
   Variants {
     model: Quickshell.screens
 

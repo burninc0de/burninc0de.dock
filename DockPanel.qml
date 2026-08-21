@@ -2,7 +2,7 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import QtQuick
-import qs.config
+import "config"
 import Quickshell.Io
 
 PanelWindow {
@@ -23,11 +23,13 @@ PanelWindow {
     Region { item: triggerStrip }
     Region { item: dockBar }
     Region { item: contextMenu }
+    Region { item: windowMenu }
   }
 
   // The window only grows tall enough for the context menu while one is open;
   // exclusiveZone is -1 either way, so nothing on screen gets pushed around.
-  implicitHeight: root.contextOpen ? 80 + contextCard.height + 10 : 80
+  // Fixed height: dock bar (80) + max context card (3 rows × 26 + 2 gaps × 1 + 16 padding = 96) + 10 margin
+  implicitHeight: 80 + 96 + 10
 
   readonly property int dockHeight: 68
   readonly property real gap: 6
@@ -38,7 +40,7 @@ PanelWindow {
   readonly property real itemPitch: itemSize + itemSpacing
 
   property bool dockVisible: true
-  property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered || contextHover.hovered
+  property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered || contextHover.hovered || windowMenuHover.hovered
   property bool workspaceEmpty: true
   property string clientsJson: ""
   property int _badgeTick: 0
@@ -68,6 +70,12 @@ PanelWindow {
   property var contextAppData: null
   property bool contextRunning: false
   property real contextAnchorX: 0
+
+  // Hover window list state.
+  property bool hoverMenuOpen: false
+  property string hoverMenuKey: ""
+  property var hoverMenuWindows: []
+  property real hoverMenuAnchorX: 0
 
   // Matches what other docks offer: GNOME's dash-to-dock, the macOS Dock and
   // KDE's task manager all agree on new-window / pin-unpin / quit. Window
@@ -363,6 +371,11 @@ PanelWindow {
     }
   }
 
+  function focusWindow(address) {
+    if (!address || address === "0x0") return
+    Hyprland.dispatch('hl.dsp.focus({ window = "address:' + address + '" })')
+  }
+
   function showDockBar() {
     hideTimer.stop()
     dockVisible = true
@@ -372,11 +385,27 @@ PanelWindow {
     if (!workspaceEmpty) hideTimer.restart()
   }
 
-  onMouseOverDockAreaChanged: mouseOverDockArea ? contextCloseTimer.stop() : contextCloseTimer.restart()
+  onMouseOverDockAreaChanged: {
+    if (mouseOverDockArea) {
+      contextCloseTimer.stop()
+      hoverCloseTimer.stop()
+    } else {
+      contextCloseTimer.restart()
+      hoverCloseTimer.restart()
+    }
+  }
 
   onWorkspaceEmptyChanged: {
     if (workspaceEmpty) showDockBar()
     else scheduleHide()
+  }
+
+  onContextOpenChanged: {
+    if (contextOpen) closeHoverMenu()
+  }
+
+  onDockVisibleChanged: {
+    if (!dockVisible) closeHoverMenu()
   }
 
   Component.onCompleted: {
@@ -401,6 +430,7 @@ PanelWindow {
            "createworkspace", "createworkspacev2",
            "destroyworkspace", "destroyworkspacev2"].includes(event.name)) {
         updateWorkspaceEmpty()
+        closeHoverMenu()
       }
       if (event.name === "windowtitle") {
         root._badgeTick++
@@ -423,14 +453,12 @@ PanelWindow {
     }
   }
 
-  // Zero interval: the hide is immediate, the timer only exists so the
-  // handoff between triggerStrip and dockBar hover doesn't flicker.
   Timer {
     id: hideTimer
-    interval: 0
+    interval: 500
     repeat: false
     onTriggered: {
-      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging || root.contextOpen) return
+      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging || root.contextOpen || root.hoverMenuOpen) return
       root.dockVisible = false
     }
   }
@@ -439,10 +467,7 @@ PanelWindow {
     id: dockBar
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.bottom: parent.bottom
-    // No transition: show/hide snaps to position.
-    anchors.bottomMargin: root.dockVisible
-      ? root.elevationMargin + root.gap
-      : root.gap - root.dockHeight - 20
+    anchors.bottomMargin: root.gap - root.dockHeight - 20
 
     implicitWidth: row.implicitWidth + 24
     implicitHeight: row.implicitHeight + 24
@@ -451,6 +476,23 @@ PanelWindow {
     radius: 18
     border.color: "#313244"
     border.width: 1
+
+    states: State {
+      name: "visible"
+      when: root.dockVisible
+      PropertyChanges {
+        target: dockBar
+        anchors.bottomMargin: root.elevationMargin + root.gap
+      }
+    }
+
+    transitions: Transition {
+      NumberAnimation {
+        property: "anchors.bottomMargin"
+        duration: 200
+        easing.type: Easing.InOutQuad
+      }
+    }
 
     Rectangle {
       anchors.fill: parent
@@ -529,6 +571,21 @@ PanelWindow {
 
           HoverHandler {
             id: itemHover
+            onHoveredChanged: {
+              if (hovered) {
+                if (appItem.toplevels.length >= 2 && !root.contextOpen) {
+                  root.hoverMenuKey = appItem.name
+                  root.hoverMenuWindows = appItem.toplevels.map(t => ({
+                    title: t.toplevel.title || appItem.name,
+                    address: t.toplevel.lastIpcObject?.address || ("0x" + t.toplevel.address)
+                  }))
+                  root.hoverMenuAnchorX = row.mapFromItem(appItem, appItem.width / 2, 0).x
+                  hoverDelayTimer.restart()
+                }
+              } else {
+                hoverCloseTimer.restart()
+              }
+            }
           }
 
           Rectangle {
@@ -548,6 +605,7 @@ PanelWindow {
             onActiveChanged: {
               if (active) {
                 hideTimer.stop()
+                root.closeHoverMenu()
                 const p = row.mapFromItem(null, centroid.scenePosition.x, centroid.scenePosition.y)
                 root.dragPointerX = p.x
                 root.dragGrabOffset = p.x - appItem.x
@@ -570,7 +628,10 @@ PanelWindow {
           TapHandler {
             acceptedButtons: Qt.RightButton
             gesturePolicy: TapHandler.ReleaseWithinBounds
-            onSingleTapped: root.openContextMenu(appItem)
+            onSingleTapped: {
+              root.closeHoverMenu()
+              root.openContextMenu(appItem)
+            }
           }
 
           TapHandler {
@@ -579,6 +640,7 @@ PanelWindow {
             // past the drag threshold, so a drag never fires a launch.
             gesturePolicy: TapHandler.DragThreshold
             onSingleTapped: {
+              root.closeHoverMenu()
               if (root.contextOpen) {
                 root.closeContextMenu()
                 return
@@ -727,6 +789,30 @@ PanelWindow {
     onTriggered: if (!root.mouseOverDockArea) root.closeContextMenu()
   }
 
+  Timer {
+    id: hoverDelayTimer
+    interval: 300
+    repeat: false
+    onTriggered: {
+      if (!root.contextOpen) root.hoverMenuOpen = true
+    }
+  }
+
+  Timer {
+    id: hoverCloseTimer
+    interval: 180
+    repeat: false
+    onTriggered: {
+      if (!root.mouseOverDockArea && !windowMenuHover.hovered) root.closeHoverMenu()
+    }
+  }
+
+  function closeHoverMenu() {
+    hoverDelayTimer.stop()
+    hoverCloseTimer.stop()
+    hoverMenuOpen = false
+  }
+
   Item {
     id: contextMenu
 
@@ -792,6 +878,89 @@ PanelWindow {
         id: widthProbe
         visible: false
         text: "Open new window"
+        font.pixelSize: 12
+      }
+    }
+  }
+
+  Item {
+    id: windowMenu
+
+    width: root.hoverMenuOpen ? windowCard.width : 0
+    height: root.hoverMenuOpen ? windowCard.height : 0
+    visible: root.hoverMenuOpen
+
+    anchors.bottom: dockBar.top
+    anchors.bottomMargin: 2
+    x: Math.max(0, Math.min(dockBar.x + root.hoverMenuAnchorX - width / 2, root.width - width))
+
+    HoverHandler { id: windowMenuHover }
+
+    Rectangle {
+      id: windowCard
+
+      // Capped so long titles elide instead of stretching the menu; the
+      // probe alone would size the card to the longest title in full.
+      implicitWidth: Math.max(150, Math.min(windowWidthProbe.implicitWidth + 24, 320))
+      implicitHeight: windowColumn.implicitHeight + 16
+
+      color: "#1e1e2e"
+      radius: 10
+      border.color: "#313244"
+      border.width: 1
+
+      Column {
+        id: windowColumn
+        anchors.centerIn: parent
+        spacing: 1
+
+        Repeater {
+          model: root.hoverMenuWindows
+
+          delegate: Rectangle {
+            required property var modelData
+
+            width: windowCard.width - 8
+            height: 26
+            radius: 6
+            color: windowRowHover.hovered ? "#313244" : "transparent"
+
+            HoverHandler { id: windowRowHover }
+
+            TapHandler {
+              acceptedButtons: Qt.LeftButton
+              onSingleTapped: {
+                root.focusWindow(modelData.address)
+                root.closeHoverMenu()
+                if (!root.workspaceEmpty) root.dockVisible = false
+              }
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              x: 8
+              text: modelData.title
+              color: "#cdd6f4"
+              font.pixelSize: 12
+              elide: Text.ElideRight
+              width: parent.width - 16
+            }
+          }
+        }
+      }
+
+      Text {
+        id: windowWidthProbe
+        visible: false
+        text: {
+          var longest = ""
+          for (var i = 0; i < root.hoverMenuWindows.length; i++) {
+            if (root.hoverMenuWindows[i].title.length > longest.length) {
+              longest = root.hoverMenuWindows[i].title
+            }
+          }
+          return longest
+        }
         font.pixelSize: 12
       }
     }
