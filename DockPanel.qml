@@ -452,9 +452,11 @@ PanelWindow {
     if (mouseOverDockArea) {
       contextCloseTimer.stop()
       hoverCloseTimer.stop()
+      pinMenuCloseTimer.stop()
     } else {
       contextCloseTimer.restart()
       hoverCloseTimer.restart()
+      pinMenuCloseTimer.restart()
     }
   }
 
@@ -875,6 +877,16 @@ PanelWindow {
     onTriggered: {
       if (!root.mouseOverDockArea && !windowMenuHover.hovered) root.closeHoverMenu()
     }
+  }
+
+  // The pin menu has no click-outside path (input outside the mask passes
+  // through the layer surface), so leaving the dock area is the close signal,
+  // same idiom as contextCloseTimer/hoverCloseTimer.
+  Timer {
+    id: pinMenuCloseTimer
+    interval: 180
+    repeat: false
+    onTriggered: if (!root.mouseOverDockArea) root.closePinMenu()
   }
 
   function closeHoverMenu() {
