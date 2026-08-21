@@ -1,45 +1,63 @@
-# quickshelldock
+# Stealth Dock
 
 <video src="https://private-user-images.githubusercontent.com/44199273/612524687-8de3dea3-8535-40db-8d07-a94fbe6f48e1.mp4" controls></video>
 
-Tiling window managers are great when you're in the zone, but sometimes you just want to click a shiny icon. This dock is for those times.
-
-Built with [Quickshell](https://quickshell.outfoxxed.me/) for Hyprland. Launches your pinned apps, tracks running windows, and most importantly **gets out of your way** when you don't need it. Instead of a timer or hover toggle, hide/show is driven by what's actually on your workspace: empty workspace → dock is visible. Windows present → dock hides. Event-driven, workspace-aware.
+An auto-hiding dock for [Omarchy](https://omarchy.org/), built on Quickshell. Launches your pinned apps, tracks running windows, and most importantly **gets out of your way** when you don't need it. Instead of a timer or hover toggle, hide/show is driven by what's actually on your workspace: empty workspace → dock is visible. Windows present → dock hides. Event-driven, workspace-aware.
 
 The scope is deliberately tight: no window thumbnails, no subprocess tracking. Just a fast launcher that knows when to be there and when to vanish — with icons you can drag into whatever order you like.
 
-## Caveats
+## Install (Omarchy)
 
-- **Multiple Quickshell instances** &mdash; Quickshell doesn't support running multiple independent shells well. If you already have another Quickshell-based panel or bar, this dock will likely conflict. Test in an isolated Hyprland session first.
+```
+omarchy plugin add https://github.com/burninc0de/burninc0de.dock.git --enable
+```
 
-## Requirements
+That clones the plugin into `~/.config/omarchy/plugins/burninc0de.dock` and starts it. Verify with `omarchy plugin list` — it should show up as `burninc0de.dock`, enabled.
+
+## Update / Disable / Uninstall
+
+```sh
+omarchy plugin update burninc0de.dock    # pull the latest version
+omarchy plugin disable burninc0de.dock   # stop it, keep it installed
+omarchy plugin enable burninc0de.dock    # bring it back
+omarchy plugin remove burninc0de.dock    # delete it
+```
+
+Uninstalling leaves your data alone: pins, drag order and removed apps live in
+`~/.local/state/quickshelldock/` (`pins.json`, `order.json`, `hidden.json`), so reinstalling puts everything back
+exactly as it was. Delete that folder for a factory reset.
+
+## Not on Omarchy?
+
+The dock is a plain Quickshell shell and runs on any Hyprland setup:
 
 - [Quickshell](https://quickshell.outfoxxed.me/) (runtime)
-- Hyprland 0.55+ (Lua config — uses `hl.dsp.focus()` dispatcher syntax)
-
-## Install
-
-Clone the repo anywhere and run with Quickshell:
+- Hyprland 0.55+ (uses the `hl.dsp.focus()` dispatcher syntax)
 
 ```
-quickshell -p /path/to/quickshelldock
+quickshell -p /path/to/burninc0de.dock
 ```
 
-Add to your Hyprland Lua config to auto-start:
+Auto-start from your Hyprland Lua config:
 
 ```lua
-o.exec_on_start("quickshell -p /path/to/quickshelldock")
+o.exec_on_start("quickshell -p /path/to/burninc0de.dock")
 ```
 
 Or if you're still on hyprlang:
 
 ```
-exec-once = quickshell -p /path/to/quickshelldock
+exec-once = quickshell -p /path/to/burninc0de.dock
 ```
+
+## Caveats
+
+- **Multiple Quickshell instances** &mdash; Quickshell doesn't support running multiple independent shells well. If you already have another Quickshell-based panel or bar, this dock will likely conflict. Test in an isolated Hyprland session first.
+- **One dock per machine** &mdash; make sure only one copy of the plugin is installed. A leftover clone under a different plugin id (e.g. an old `zeno.dock`) runs a second dock on top of this one.
 
 ## Configuration
 
-Copy `config/UserConfig.example.qml` to `config/UserConfig.qml` and edit it to customize your apps. Both files are in the project directory so Quickshell's native hot reload picks up changes instantly, no restart needed.
+Copy `config/UserConfig.example.qml` to `config/UserConfig.qml` and edit it to customize your apps. Both files are in the plugin directory so Quickshell's native hot reload picks up changes instantly, no restart needed.
 
 `UserConfig.qml` is gitignored, so your personal config stays out of the repo. Without one, the defaults in `config/DockApps.qml` apply.
 
@@ -160,6 +178,7 @@ The dock uses a two-tier approach: `Hyprland.toplevels` (fast, via `rawEvent`) c
 
 ```
 ├── Dock.qml             entrypoint, one DockPanel per screen
+├── manifest.json        Omarchy plugin manifest (id: burninc0de.dock)
 ├── DockPanel.qml        dock UI, auto-hide, window matching, menus
 ├── bin/
 │   └── quickshelldock-pin     pin/unpin CLI (sole writer of pin state)
