@@ -4,7 +4,7 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 
 ## Structure
 
-- `shell.qml` — entrypoint, instantiates `DockPanel` per screen via `Variants`
+- `Dock.qml` — entrypoint, instantiates `DockPanel` per screen via `Variants`
 - `DockPanel.qml` — the dock UI: auto-hide, bounce-on-launch, Hyprland toplevel matching, window focus
 - `config/DockApps.qml` — singleton defining the ordered app list (name, icon, cmd, optional `match`)
 
@@ -39,15 +39,21 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 
 - App matching: if `match` is set, matches against Hyprland toplevel `title`; if `appId` is set, matches against the Wayland `appId`; otherwise extracts the binary name from `cmd` and matches against `appId` or `class`
 - `Quickshell.execDetached(cmdParts)` launches apps — always split `cmd` on whitespace
+- Unread badge: hardcoded Gmail convention — counts `Inbox (N)` in window titles; `_badgeTick` bumps on Hyprland
+  `windowtitle` events to re-evaluate the badge bindings without polling
 - The dock uses `WlrLayershell.layer: Top` and `exclusiveZone: -1` (no exclusive zone)
-- Show/hide is a plain `anchors.bottomMargin` binding with no Transition, and `hideTimer.interval` is `0` — the timer
-  only exists so the triggerStrip/dockBar hover handoff doesn't flicker
+- Show/hide animates `anchors.bottomMargin` via a `states` + `Transition` (200ms InOutQuad). `hideTimer.interval` is
+  `500` — the delay exists so the triggerStrip/dockBar hover handoff doesn't flicker, not as a show/hide driver
+- Menus (context + hover window list) must hide the dock explicitly on click
+  (`if (!root.workspaceEmpty) root.dockVisible = false`) — focusing a window alone doesn't
+- Menu cards are sized by hidden probe `Text` items; the width cap (`Math.min(..., 320)`) is what makes the rows'
+  `elide` engage — an uncapped probe stretches the card to the longest title and elide never fires
 - Layer namespace is `quickshelldock`
 
 ## Dock visibility
 
 - Empty workspace → dock always visible
 - Workspace with windows → dock auto-hides (shows on hover at bottom edge)
-- `showOnFloating` config flag (default: `false`) — when `true`, floating-only workspaces are treated as empty
+- `showOnFloating` config flag (default: `true`) — when `true`, floating-only workspaces are treated as empty
 - Detection: fast path iterates `Hyprland.toplevels` for the common cases (empty workspace, `showOnFloating` disabled); only falls back to `hyprctl clients -j` when `showOnFloating` is true and there are windows on the workspace
 - Relevant Hyprland events: `workspace`, `workspacev2`, `activewindow`, `activewindowv2`, `createworkspace`, `createworkspacev2`, `destroyworkspace`, `destroyworkspacev2`
