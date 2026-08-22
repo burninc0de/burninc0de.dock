@@ -875,6 +875,8 @@ PanelWindow {
               id: badgeText
               anchors.centerIn: parent
               text: appItem.unreadCount > 99 ? "99+" : appItem.unreadCount.toString()
+              // Numeric today, but derived from titles — keep it plain.
+              textFormat: Text.PlainText
               color: "#ffffff"
               font.pixelSize: 10
               font.bold: true
@@ -1053,6 +1055,9 @@ PanelWindow {
               anchors.verticalCenter: parent.verticalCenter
               x: 8
               text: modelData.title
+              // Titles are app-controlled; AutoText would sniff markup and
+              // let <img> etc. pull resources into the shell.
+              textFormat: Text.PlainText
               color: Color.menu.text
               font.pixelSize: 12
               elide: Text.ElideRight
@@ -1065,6 +1070,8 @@ PanelWindow {
       Text {
         id: windowWidthProbe
         visible: false
+        // Same untrusted titles as the rows above; invisible still parses.
+        textFormat: Text.PlainText
         text: {
           var longest = ""
           for (var i = 0; i < root.hoverMenuWindows.length; i++) {
@@ -1148,6 +1155,8 @@ PanelWindow {
               Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.label
+                // Labels are window class/appId, i.e. outside data.
+                textFormat: Text.PlainText
                 color: modelData.empty ? Color.muted : Color.menu.text
                 font.pixelSize: 12
                 elide: Text.ElideRight

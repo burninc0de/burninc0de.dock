@@ -60,6 +60,9 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
   (`if (!root.workspaceEmpty) root.dockVisible = false`) — focusing a window alone doesn't
 - Menu cards are sized by hidden probe `Text` items; the width cap (`Math.min(..., 320)`) is what makes the rows'
   `elide` engage — an uncapped probe stretches the card to the longest title and elide never fires
+- Every `Text` that renders non-literal data (window titles, class/appId labels, badge counts) declares
+  `textFormat: Text.PlainText` — default AutoText sniffs markup, so a title like `<img src=...>` would parse as
+  rich text and load resources into the long-lived shell. Invisible probes still parse their text and need it too
 - Layer namespace is `quickshelldock`
 
 ## Dock visibility
