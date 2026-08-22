@@ -47,6 +47,13 @@ PanelWindow {
   property string clientsJson: ""
   property int _badgeTick: 0
 
+  // Byte ceilings for everything whose length the dock doesn't control:
+  // state files are user-writable and hyprctl output scales with open
+  // windows, so neither may reach this long-lived process unbounded. Both
+  // are orders of magnitude above any legitimate data.
+  readonly property int maxStateBytes: 65536
+  readonly property int maxClientsBytes: 1048576
+
   // Drag-to-reorder state. Only one icon can be dragged at a time, so this
   // lives on the root rather than in the delegates.
   property string dragName: ""
@@ -102,7 +109,11 @@ PanelWindow {
 
   Process {
     id: clientsProcess
-    command: ["hyprctl", "clients", "-j"]
+    // Piped through head -c so the collector's buffer is capped even for a
+    // pathological client list. Truncation is unreachable below ~2000
+    // windows; if it ever happened, JSON.parse fails and the workspace
+    // counts as empty — degraded cosmetics, not a ballooning shell.
+    command: ["sh", "-c", "hyprctl clients -j | head -c " + root.maxClientsBytes]
     stdout: StdioCollector {
       onStreamFinished: { root.clientsJson = this.text }
     }
@@ -114,10 +125,67 @@ PanelWindow {
     running: true
   }
 
+  // State files are user-writable, so their byte length is untrusted: the
+  // dock never loads them through FileView (which buffers whole files) but
+  // reads through head -c. The FileViews below are watchers only —
+  // preload: false keeps them from buffering any text while still firing
+  // fileChanged. bin/quickshelldock-pin renames fully-written temp files
+  // into place, so a read started by fileChanged always sees complete JSON.
+  Process {
+    id: stateReader
+    property string kind: ""
+    // Reads requested while one is in flight drain here, oldest first. A
+    // single slot would drop every request but the last: startup fires all
+    // three reads back-to-back and pins would lose to hidden.
+    property var pendingQueue: []
+    stdout: StdioCollector {
+      onStreamFinished: root.consumeStateFile(stateReader.kind, this.text)
+    }
+    // Missing files at first boot are normal; keep head's stderr out of the log.
+    stderr: StdioCollector {}
+    onExited: {
+      if (stateReader.pendingQueue.length === 0) return
+      const next = stateReader.pendingQueue.shift()
+      root.readStateFile(next.kind, next.path)
+    }
+  }
+
+  function readStateFile(kind, path) {
+    if (stateReader.running) {
+      stateReader.pendingQueue.push({ kind: kind, path: path })
+      return
+    }
+    stateReader.kind = kind
+    stateReader.command = ["head", "-c", String(root.maxStateBytes), "--", path]
+    stateReader.running = true
+  }
+
+  function parseJsonArray(raw, label) {
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (e) {
+      if (raw.length >= root.maxStateBytes)
+        console.warn("quickshelldock:", label, "is at or over the",
+          root.maxStateBytes, "byte read ceiling; ignoring it")
+      return []
+    }
+  }
+
+  function consumeStateFile(kind, raw) {
+    if (kind === "order") savedOrder = parseJsonArray(raw, "order.json")
+    else if (kind === "pins") pinnedApps = parseJsonArray(raw, "pins.json")
+    else if (kind === "hidden") hiddenApps = parseJsonArray(raw, "hidden.json")
+    else return
+    if (!dragging) rebuildModel()
+  }
+
+  // Write-only handle for drag order. Never loaded, so nothing from disk is
+  // buffered here either.
   FileView {
     id: orderFile
     path: root.orderPath
-    blockLoading: true
+    preload: false
     printErrors: false
     atomicWrites: true
   }
@@ -127,14 +195,10 @@ PanelWindow {
   FileView {
     id: hiddenFile
     path: root.hiddenPath
-    blockLoading: true
+    preload: false
     printErrors: false
     watchChanges: true
-    onFileChanged: reload()
-    onTextChanged: {
-      root.loadHidden()
-      if (!root.dragging) root.rebuildModel()
-    }
+    onFileChanged: readStateFile("hidden", root.hiddenPath)
   }
 
   // Written by bin/quickshelldock-pin, never by the dock. Watching it is what
@@ -142,16 +206,10 @@ PanelWindow {
   FileView {
     id: pinsFile
     path: root.pinsPath
-    blockLoading: true
+    preload: false
     printErrors: false
     watchChanges: true
-    // reload() is async, so the merge has to wait for the text to actually
-    // land rather than reading it back on the fileChanged tick.
-    onFileChanged: reload()
-    onTextChanged: {
-      root.loadPins()
-      if (!root.dragging) root.rebuildModel()
-    }
+    onFileChanged: readStateFile("pins", root.pinsPath)
   }
 
 
@@ -171,33 +229,6 @@ PanelWindow {
       appId: app.appId ?? "",
       minimizable: app.minimizable !== false,
     }
-  }
-
-  function loadHidden() {
-    try {
-      const raw = hiddenFile.text()
-      hiddenApps = raw ? (JSON.parse(raw) || []) : []
-    } catch (e) {
-      hiddenApps = []
-    }
-  }
-
-  function loadPins() {
-    try {
-      const raw = pinsFile.text()
-      pinnedApps = raw ? (JSON.parse(raw) || []) : []
-    } catch (e) {
-      pinnedApps = []
-    }
-  }
-
-  function loadSavedOrder() {
-    try {
-      const raw = orderFile.text()
-      if (!raw) return
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed)) savedOrder = parsed
-    } catch (e) {}
   }
 
   // Declaration order in the config is the baseline; anything the user has
@@ -474,9 +505,9 @@ PanelWindow {
   }
 
   Component.onCompleted: {
-    loadSavedOrder()
-    loadPins()
-    loadHidden()
+    readStateFile("order", root.orderPath)
+    readStateFile("pins", root.pinsPath)
+    readStateFile("hidden", root.hiddenPath)
     rebuildModel()
     updateWorkspaceEmpty()
   }

@@ -14,8 +14,15 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
   `Qt.resolvedUrl` relative to `DockPanel.qml` — `Quickshell.shellDir` points at omarchy-shell's own dir when loaded
   as a plugin, not at the plugin folder)
   rather than editing the file itself, so there is one code path for pin state
-- `FileView.reload()` is async — merge pins on `onTextChanged`, not on `onFileChanged`, or you read back stale text
-  and the dock silently ignores the change
+- State files are read with byte ceilings: nothing is ever loaded through `FileView` (it buffers whole files and has
+  no size cap). The FileViews for `pins.json`/`hidden.json` are watchers only (`preload: false`, `watchChanges`) —
+  verified that they still emit `fileChanged` while never loading. All content goes through one shared Process running
+  `head -c <maxStateBytes> -- <path>`; truncated output fails `JSON.parse` and degrades to an empty list. Reads
+  requested mid-read queue in a FIFO (`pendingQueue`) and replay on `onExited` (`Process.running` flips
+  synchronously, so back-to-back startup reads must queue — a single pending slot silently drops all but the
+  last of them, which is how pins used to vanish at startup)
+- The pin tool writes via temp-file + rename, so a watcher-triggered read always sees complete JSON; there is no
+  partial-read race to guard against
 - Pins merge after config apps and dedupe on name or cmd, so pinning something already in `UserConfig.qml` is a no-op
 - Some packaged `.desktop` files ship an unsubstituted `StartupWMClass` placeholder (Chromium's is
   `@@startup_wm_class`); the pin tool drops those so matching falls back to the binary name
@@ -61,4 +68,7 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 - Workspace with windows → dock auto-hides (shows on hover at bottom edge)
 - `showOnFloating` config flag (default: `true`) — when `true`, floating-only workspaces are treated as empty
 - Detection: fast path iterates `Hyprland.toplevels` for the common cases (empty workspace, `showOnFloating` disabled); only falls back to `hyprctl clients -j` when `showOnFloating` is true and there are windows on the workspace
+- Unbounded inputs are capped at ingestion (`maxStateBytes`, `maxClientsBytes`): the clients query is piped through
+  `head -c`, so even a pathological window count can't balloon the shell; truncation fails JSON.parse and reads as
+  "empty workspace"
 - Relevant Hyprland events: `workspace`, `workspacev2`, `activewindow`, `activewindowv2`, `createworkspace`, `createworkspacev2`, `destroyworkspace`, `destroyworkspacev2`
