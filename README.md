@@ -1,6 +1,6 @@
 # Stealth Dock
 
-<img width="1920" height="1200" alt="image" src="https://github.com/user-attachments/assets/9d42a453-aa23-4a35-aea6-e3530882b608" />
+<img width="1600" height="1000" alt="Stealth Dock preview" src="preview.png" />
 
 An auto-hiding dock for [Omarchy](https://omarchy.org/), built on Quickshell. Launches your pinned apps, tracks running windows, and most importantly **gets out of your way** when you don't need it. Instead of a timer or hover toggle, hide/show is driven by what's actually on your workspace: empty workspace → dock is visible. Windows present → dock hides. Event-driven, workspace-aware.
 
