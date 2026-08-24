@@ -439,7 +439,6 @@ PanelWindow {
     const raw = entry.cls || entry.appId || ""
     if (!raw) return ""
     const lower = raw.toLowerCase()
-    if (lower.includes("whatsapp")) return "whatsapp"
     const m = lower.match(/chrome-([^_]+)/)
     if (m) {
       const host = m[1]
