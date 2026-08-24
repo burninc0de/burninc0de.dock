@@ -134,8 +134,17 @@ pin() {
   # For omarchy webapps the desktop has no StartupWMClass but the window
   # class is chrome-host__-Default. When pinning from a running window, use
   # the window class as appId so the dock can match the window afterwards.
-  if [[ -z "$app_id" && -n "$window_class" ]]; then
+  # Chrome PWAs have a stale crx_... StartupWMClass that doesn't match the
+  # Wayland appId (chrome-...-Default), so prefer the live class when given.
+  if [[ -n "$window_class" ]]; then
     app_id="$window_class"
+  elif [[ -z "$app_id" ]]; then
+    # Pinned via --pick/desktop id: synthesize chrome-host id for webapps.
+    local _exec_line
+    _exec_line=$(entry_key "$file" Exec)
+    if [[ "$_exec_line" =~ https?://([^/[:space:]\":]+) ]]; then
+      app_id="chrome-${BASH_REMATCH[1],,}__-Default"
+    fi
   fi
 
   [[ -n $exec_line ]] || die "$id has no Exec= line"
@@ -181,6 +190,16 @@ unpin() {
 # match, then omarchy webapp URL host, XDG order breaks remaining ties.
 find_desktop_for_window() {
   local key="${1,,}" dir file wm exec_bin exec_line host
+  # Desktop id itself often equals Wayland appId (Chrome Apps: chrome-...-Default)
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      local fid
+      fid=$(basename "$file" .desktop)
+      [[ "${fid,,}" == "$key" ]] && { basename "$file" .desktop; return 0; }
+    done
+  done < <(desktop_dirs)
   while IFS= read -r dir; do
     [[ -d "$dir" ]] || continue
     for file in "$dir"/*.desktop; do
@@ -200,6 +219,9 @@ find_desktop_for_window() {
   done < <(desktop_dirs)
   # Omarchy webapps: Exec contains https://host, class is chrome-host__-Default
   # e.g. Exec=omarchy-launch-webapp https://web.whatsapp.com/ vs class=chrome-web.whatsapp.com__-Default
+  # Prefer longest host so music.youtube.com beats youtube.com for
+  # chrome-music.youtube.com__-Default.
+  local best_file="" best_len=0
   while IFS= read -r dir; do
     [[ -d "$dir" ]] || continue
     for file in "$dir"/*.desktop; do
@@ -207,12 +229,16 @@ find_desktop_for_window() {
       exec_line=$(entry_key "$file" Exec)
       if [[ "$exec_line" =~ https?://([^/[:space:]\":]+) ]]; then
         host="${BASH_REMATCH[1],,}"
-        if [[ "$key" == *"$host"* ]]; then
-          basename "$file" .desktop; return 0
+        if [[ "$key" == *"$host"* && ${#host} -gt $best_len ]]; then
+          best_file="$file"
+          best_len=${#host}
         fi
       fi
     done
   done < <(desktop_dirs)
+  if [[ -n "$best_file" ]]; then
+    basename "$best_file" .desktop; return 0
+  fi
   return 1
 }
 
@@ -225,8 +251,9 @@ pin_window() {
 
   # The app-id often IS a desktop id (native Wayland apps), which pin()
   # resolves itself. Otherwise claim-by-class, else blind.
+  # Pass window class even on direct id match so Chrome PWAs don't keep stale crx_... StartupWMClass.
   if find_desktop "$key" >/dev/null 2>&1; then
-    pin "$key"
+    pin "$key" "$key"
   elif id=$(find_desktop_for_window "$key"); then
     pin "$id" "$key"
   else
@@ -333,6 +360,15 @@ resolve_name() {
     [[ -d "$dir" ]] || continue
     for file in "$dir"/*.desktop; do
       [[ -e "$file" ]] || continue
+      local fid
+      fid=$(basename "$file" .desktop)
+      [[ "${fid,,}" == "$key" ]] && { entry_key "$file" Name; return 0; }
+    done
+  done < <(desktop_dirs)
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
       wm=$(entry_key "$file" StartupWMClass)
       [[ $wm == *@@* || $wm == *%* ]] && wm=""
       [[ ${wm,,} == "$key" ]] && { entry_key "$file" Name; return 0; }
@@ -346,6 +382,7 @@ resolve_name() {
       [[ ${exec_bin,,} == "$key" ]] && { entry_key "$file" Name; return 0; }
     done
   done < <(desktop_dirs)
+  local best_name="" best_len=0
   while IFS= read -r dir; do
     [[ -d "$dir" ]] || continue
     for file in "$dir"/*.desktop; do
@@ -353,12 +390,16 @@ resolve_name() {
       exec_line=$(entry_key "$file" Exec)
       if [[ "$exec_line" =~ https?://([^/[:space:]\":]+) ]]; then
         host="${BASH_REMATCH[1],,}"
-        if [[ "$key" == *"$host"* ]]; then
-          entry_key "$file" Name; return 0
+        if [[ "$key" == *"$host"* && ${#host} -gt $best_len ]]; then
+          best_name=$(entry_key "$file" Name)
+          best_len=${#host}
         fi
       fi
     done
   done < <(desktop_dirs)
+  if [[ -n "$best_name" ]]; then
+    echo "$best_name"; return 0
+  fi
   echo "$1"
   return 1
 }
@@ -397,6 +438,9 @@ dump_map() {
         key="${exec_bin,,}"
         [[ -n ${seen[$key]:-} ]] || { seen[$key]=1; printf '%s\t%s\n' "$key" "$name"; }
       fi
+      # desktop id itself is often the Wayland appId (chrome-...-Default for Chrome Apps)
+      key="$(basename "$file" .desktop | tr '[:upper:]' '[:lower:]')"
+      [[ -n ${seen[$key]:-} ]] || { seen[$key]=1; printf '%s\t%s\n' "$key" "$name"; }
       exec_line=$(entry_key "$file" Exec)
       if [[ "$exec_line" =~ https?://([^/[:space:]\":]+) ]]; then
         host="${BASH_REMATCH[1],,}"
