@@ -861,6 +861,16 @@ PanelWindow {
 
           property bool busy: false
 
+          // Debounce guard against double-launch. Normally cleared when a
+          // matching toplevel appears; this timer is the fallback for a launch
+          // that never produces one (bad binary, instant crash), so the icon
+          // can't stay dead until the next shell restart.
+          Timer {
+            interval: 5000
+            running: appItem.busy
+            onTriggered: appItem.busy = false
+          }
+
           readonly property var toplevels: root.getToplevelsForApp(appItem.appData)
           readonly property bool isRunning: toplevels.length > 0
           readonly property int pid: isRunning ? toplevels[0].pid : 0
