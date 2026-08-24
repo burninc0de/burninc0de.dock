@@ -28,10 +28,11 @@ PanelWindow {
     Region { item: pinMenu }
   }
 
-  // The window only grows tall enough for the context menu while one is open;
-  // exclusiveZone is -1 either way, so nothing on screen gets pushed around.
-  // Fixed height: dock bar (80) + max context card (3 rows × 26 + 2 gaps × 1 + 16 padding = 96) + 10 margin
-  implicitHeight: 80 + 96 + 10
+  // The window is intentionally oversized so menus have room to grow above
+  // the dock bar without clipping or dynamic height flicker. exclusiveZone
+  // is -1 either way, so nothing on screen gets pushed around.
+  // 320 fits ~8 pin rows (8*26+7*1+16 = 231) + dock bar (78) + gap/margin (9).
+  implicitHeight: 320
 
   readonly property int dockHeight: 68
   readonly property real gap: 6
@@ -105,6 +106,12 @@ PanelWindow {
   property bool pinMenuOpen: false
   property var pinCandidates: []
   property real pinMenuAnchorX: 0
+  // Show-more pagination: keep the card bounded (~5 rows) and expand on demand.
+  // The window is already oversized, so expanding does not resize the surface.
+  readonly property int pinMenuPageSize: 5
+  property bool pinMenuExpanded: false
+  readonly property bool pinMenuHasMore: pinCandidates.length > pinMenuPageSize
+  readonly property var pinMenuVisibleCandidates: pinMenuExpanded ? pinCandidates : pinCandidates.slice(0, pinMenuPageSize)
 
   // Matches what other docks offer: GNOME's dash-to-dock, the macOS Dock and
   // KDE's task manager all agree on new-window / pin-unpin / quit. Window
@@ -498,6 +505,7 @@ PanelWindow {
     root.closeHoverMenu()
     root.pinCandidates = root.buildPinCandidates()
     root.pinMenuAnchorX = xInBar
+    root.pinMenuExpanded = false
     root.pinMenuOpen = true
     // Resolve human-readable names in background. Menu opens immediately
     // with class labels; labels swap to resolved names within ~50ms.
@@ -517,6 +525,7 @@ PanelWindow {
 
   function closePinMenu() {
     root.pinMenuOpen = false
+    root.pinMenuExpanded = false
   }
 
   // Resolves human-readable names for pin menu candidates. The QML side
@@ -1195,76 +1204,123 @@ PanelWindow {
       // +42 covers the app-icon column and the right-aligned pin glyph;
       // capped like the other cards so long names elide instead of stretching.
       implicitWidth: Math.max(150, Math.min(pinWidthProbe.implicitWidth + 24 + 42, 320))
-      implicitHeight: pinColumn.implicitHeight + 16
+      implicitHeight: pinFlick.height + 16
 
       color: Color.menu.background
       radius: 10
       border.color: Qt.alpha(Color.foreground, 0.18)
       border.width: 1
 
-      Column {
-        id: pinColumn
+      Flickable {
+        id: pinFlick
         anchors.centerIn: parent
-        spacing: 1
+        width: pinCard.width - 8
+        // Cap at 8 rows (8*26+7*1 = 215) so the card never outgrows the
+        // oversized window. Collapsed state shows 5 + "Show more" and fits
+        // without scrolling.
+        height: Math.min(pinColumn.implicitHeight, 215)
+        clip: true
+        contentHeight: pinColumn.implicitHeight
+        flickableDirection: Flickable.VerticalFlick
+        boundsBehavior: Flickable.StopAtBounds
 
-        Repeater {
-          model: root.pinCandidates.length > 0
-            ? root.pinCandidates
-            : [{ label: "No unpinned apps running", empty: true }]
-
-          delegate: Rectangle {
-            required property var modelData
-
-            width: pinCard.width - 8
-            height: 26
-            radius: 6
-            color: !modelData.empty && pinRowHover.hovered ? Color.menu.selectedBackground : "transparent"
-
-            HoverHandler { id: pinRowHover }
-
-            TapHandler {
-              acceptedButtons: Qt.LeftButton
-              enabled: !modelData.empty
-              onSingleTapped: root.runPinAction(modelData)
+        WheelHandler {
+          onWheel: event => {
+            if (pinFlick.contentHeight > pinFlick.height) {
+              const dy = event.angleDelta.y > 0 ? -40 : 40
+              pinFlick.contentY = Math.max(0, Math.min(pinFlick.contentHeight - pinFlick.height, pinFlick.contentY + dy))
+              event.accepted = true
             }
+          }
+        }
 
-            Row {
-              anchors.verticalCenter: parent.verticalCenter
-              x: 8
-              spacing: 8
+        Column {
+          id: pinColumn
+          width: parent.width
+          spacing: 1
 
-              Image {
-                source: modelData.empty ? "" : Quickshell.iconPath(root.pinCandidateIcon(modelData), true)
-                width: 16
-                height: 16
-                visible: !modelData.empty
+          Repeater {
+            model: root.pinCandidates.length > 0
+              ? root.pinMenuVisibleCandidates
+              : [{ label: "No unpinned apps running", empty: true }]
+
+            delegate: Rectangle {
+              required property var modelData
+
+              width: pinColumn.width
+              height: 26
+              radius: 6
+              color: !modelData.empty && pinRowHover.hovered ? Color.menu.selectedBackground : "transparent"
+
+              HoverHandler { id: pinRowHover }
+
+              TapHandler {
+                acceptedButtons: Qt.LeftButton
+                enabled: !modelData.empty
+                onSingleTapped: root.runPinAction(modelData)
+              }
+
+              Row {
                 anchors.verticalCenter: parent.verticalCenter
-                fillMode: Image.PreserveAspectFit
+                x: 8
+                spacing: 8
+
+                Image {
+                  source: modelData.empty ? "" : Quickshell.iconPath(root.pinCandidateIcon(modelData), true)
+                  width: 16
+                  height: 16
+                  visible: !modelData.empty
+                  anchors.verticalCenter: parent.verticalCenter
+                  fillMode: Image.PreserveAspectFit
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: modelData.label
+                  // Labels are window class/appId, i.e. outside data.
+                  textFormat: Text.PlainText
+                  color: modelData.empty ? Color.muted : Color.menu.text
+                  font.pixelSize: 12
+                  elide: Text.ElideRight
+                  // Reserve room for the pin glyph only on pinnable rows; the
+                  // empty-state row has no icon column either.
+                  width: modelData.empty ? pinCard.width - 40 : pinCard.width - 64
+                }
               }
 
               Text {
+                anchors.right: parent.right
+                anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
-                text: modelData.label
-                // Labels are window class/appId, i.e. outside data.
-                textFormat: Text.PlainText
-                color: modelData.empty ? Color.muted : Color.menu.text
-                font.pixelSize: 12
-                elide: Text.ElideRight
-                // Reserve room for the pin glyph only on pinnable rows; the
-                // empty-state row has no icon column either.
-                width: modelData.empty ? pinCard.width - 40 : pinCard.width - 64
+                // Same glyph the pin tool uses for its notifications.
+                text: "󰐃"
+                color: pinRowHover.hovered ? Color.menu.text : Color.muted
+                font.pixelSize: 13
+                visible: !modelData.empty
               }
+            }
+          }
+
+          Rectangle {
+            visible: !root.pinMenuExpanded && root.pinMenuHasMore
+            width: pinColumn.width
+            height: visible ? 26 : 0
+            radius: 6
+            color: showMoreHover.hovered ? Color.menu.selectedBackground : "transparent"
+
+            HoverHandler { id: showMoreHover }
+
+            TapHandler {
+              acceptedButtons: Qt.LeftButton
+              onSingleTapped: root.pinMenuExpanded = true
             }
 
             Text {
-              anchors.right: parent.right
-              anchors.rightMargin: 8
-              anchors.verticalCenter: parent.verticalCenter
-              // Same glyph the pin tool uses for its notifications.
-              text: "󰐃"
-              color: pinRowHover.hovered ? Color.menu.text : Color.muted
-              font.pixelSize: 13
-              visible: !modelData.empty
+              anchors.centerIn: parent
+              text: "Show " + (root.pinCandidates.length - root.pinMenuPageSize) + " more…"
+              textFormat: Text.PlainText
+              color: Color.muted
+              font.pixelSize: 12
             }
           }
         }
