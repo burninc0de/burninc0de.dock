@@ -24,7 +24,7 @@ omarchy plugin remove burninc0de.dock    # delete it
 ```
 
 Uninstalling leaves your data alone: pins, drag order and removed apps live in
-`~/.local/state/omarchy/dock/` (`pins.json`, `order.json`, `hidden.json`), so reinstalling puts everything back
+`~/.local/state/omarchy/stealthdock/` (`pins.json`, `order.json`, `hidden.json`), so reinstalling puts everything back
 exactly as it was. Delete that folder for a factory reset. If you are updating from an older version that used
 `~/.local/state/quickshelldock/`, your data is migrated automatically on first launch.
 
@@ -98,7 +98,7 @@ bin/quickshelldock-pin --list
 ```
 
 It reads the `.desktop` file for you, strips launcher field codes (`%U`, `%f`, …) out of `Exec=`, and appends the app
-to `$XDG_STATE_HOME/omarchy/dock/pins.json` (`~/.local/state/omarchy/dock/pins.json` by default). The dock watches that file, so the icon appears immediately. Symlink
+to `$XDG_STATE_HOME/omarchy/stealthdock/pins.json` (`~/.local/state/omarchy/stealthdock/pins.json` by default). The dock watches that file, so the icon appears immediately. Symlink
 the script into `~/.local/bin` to have it on `PATH`.
 
 **Pin from the Omarchy menu (Super+Space).** Run `integration/install-omarchy-menu-rightclick` once, then right-click
@@ -153,7 +153,7 @@ list — clicking the icon goes straight to the window.
 ## Reordering
 
 Drag an icon sideways to move it. The remaining icons shuffle out of the way as you go, and the order is written to
-`$XDG_STATE_HOME/omarchy/dock/order.json` (`~/.local/state/omarchy/dock/order.json` by default) on release, so it
+`$XDG_STATE_HOME/omarchy/stealthdock/order.json` (`~/.local/state/omarchy/stealthdock/order.json` by default) on release, so it
 survives a restart.
 
 The saved order takes priority over the order apps are declared in the config. Apps added to the config afterwards

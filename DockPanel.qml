@@ -62,12 +62,12 @@ PanelWindow {
   readonly property bool dragging: dragName !== ""
 
   // Icon order survives restarts here. Kept out of the config dir so a
-  // git pull never fights with it. State lives under XDG_STATE_HOME/omarchy/dock
-  // (i.e. ~/.local/state/omarchy/dock) — the Omarchy convention is to
-  // namespace all persistent state under omarchy/, not top-level.
+  // git pull never fights with it. State lives under XDG_STATE_HOME/omarchy/stealthdock
+  // (i.e. ~/.local/state/omarchy/stealthdock) — namespaced under omarchy/ per
+  // convention and using the product name to avoid collisions with other docks.
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME")
-    || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/dock"
-  // Previous location before the omarchy/ namespacing fix — migrated on startup.
+    || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/stealthdock"
+  // Legacy top-level dir before the omarchy/stealthdock namespacing — migrated on startup.
   readonly property string legacyStateDir: (Quickshell.env("XDG_STATE_HOME")
     || (Quickshell.env("HOME") + "/.local/state")) + "/quickshelldock"
   readonly property string orderPath: stateDir + "/order.json"
@@ -127,9 +127,8 @@ PanelWindow {
   Process {
     id: mkdirProcess
     // Ensures the new state dir exists and migrates any files from the legacy
-    // top-level quickshelldock dir (pre-omarchy namespacing). Only copies files
-    // that don't already exist at the new location so a fresh install never
-    // clobbers user data.
+    // top-level quickshelldock dir. Only copies files that don't already exist
+    // so a fresh install never clobbers user data.
     command: ["sh", "-c", "mkdir -p \"$1\"; if [ -d \"$2\" ]; then for f in order.json pins.json hidden.json; do [ -f \"$2/$f\" ] && [ ! -e \"$1/$f\" ] && cp -n -- \"$2/$f\" \"$1/$f\" 2>/dev/null; done; fi", "sh", root.stateDir, root.legacyStateDir]
     running: true
   }
