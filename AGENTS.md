@@ -5,7 +5,7 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 ## Structure
 
 - `Dock.qml` — entrypoint, instantiates `DockPanel` per screen via `Variants`
-- `DockPanel.qml` — the dock UI: auto-hide, bounce-on-launch, Hyprland toplevel matching, window focus
+- `DockPanel.qml` — the dock UI: auto-hide, launch debounce (`busy` per icon, cleared when a matching toplevel appears), Hyprland toplevel matching, window focus
 - `config/DockApps.qml` — singleton defining the ordered app list (name, icon, cmd, optional `match`)
 
 ## Pinning

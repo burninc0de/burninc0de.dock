@@ -845,7 +845,6 @@ PanelWindow {
                 if (!root.workspaceEmpty) root.dockVisible = false
               } else if (!appItem.busy) {
                 appItem.busy = true
-                bounceAnimation.start()
                 Quickshell.execDetached(cmdParts)
               }
             }
@@ -853,25 +852,6 @@ PanelWindow {
 
           onIsRunningChanged: {
             if (isRunning) busy = false
-            bounceAnimation.stop()
-            iconImg.y = 0
-          }
-
-          SequentialAnimation {
-            id: bounceAnimation
-            loops: Animation.Infinite
-            NumberAnimation {
-              target: iconImg
-              property: "y"
-              from: 0; to: -24; duration: 0
-              easing.type: Easing.OutQuad
-            }
-            NumberAnimation {
-              target: iconImg
-              property: "y"
-              to: 0; duration: 0
-              easing.type: Easing.InQuad
-            }
           }
 
           Image {
