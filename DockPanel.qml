@@ -352,6 +352,42 @@ PanelWindow {
     if (empty !== workspaceEmpty) workspaceEmpty = empty
   }
 
+  // Tokenizes an XDG desktop-entry Exec value per the freedesktop spec:
+  // split on unquoted whitespace, honor double quotes (where \ escapes
+  // " \ $ `), single quotes (fully literal), and backslash escapes.
+  // A plain split(/\s+/) corrupts any argument containing a quoted space.
+  function execTokenize(exec) {
+    const parts = []
+    let cur = "", has = false, i = 0
+    while (i < exec.length) {
+      const c = exec[i]
+      if (c === " " || c === "\t") {
+        if (has) { parts.push(cur); cur = ""; has = false }
+        i++
+        continue
+      }
+      if (c === '"') {
+        has = true; i++
+        while (i < exec.length && exec[i] !== '"') {
+          if (exec[i] === "\\" && '"\\$`'.includes(exec[i + 1] ?? "")) i++
+          cur += exec[i++] ?? ""
+        }
+        i++
+        continue
+      }
+      if (c === "'") {
+        has = true; i++
+        while (i < exec.length && exec[i] !== "'") cur += exec[i++]
+        i++
+        continue
+      }
+      if (c === "\\" && exec[i + 1]) { cur += exec[i + 1]; i += 2; has = true; continue }
+      cur += c; has = true; i++
+    }
+    if (has) parts.push(cur)
+    return parts
+  }
+
   function getUnreadCount(toplevels) {
     for (const tl of toplevels) {
       const title = tl.toplevel?.title || ""
@@ -375,7 +411,7 @@ PanelWindow {
         const appId = (tl.wayland?.appId ?? "").toLowerCase()
         if (appId.includes(app.appId.toLowerCase())) matched = true
       } else {
-        const exe = app.cmd.split(/\s+/)[0].split("/").pop().replace(/\.[^/.]+$/, "").toLowerCase()
+        const exe = root.execTokenize(app.cmd)[0].split("/").pop().replace(/\.[^/.]+$/, "").toLowerCase()
         const appId = (tl.wayland?.appId ?? "").toLowerCase()
         const cls = (tl.lastIpcObject?.class ?? "").toLowerCase()
         if (appId.includes(exe) || cls.includes(exe) || (cls && exe.includes(cls))) matched = true
@@ -463,10 +499,48 @@ PanelWindow {
     root.pinCandidates = root.buildPinCandidates()
     root.pinMenuAnchorX = xInBar
     root.pinMenuOpen = true
+    // Resolve human-readable names in background. Menu opens immediately
+    // with class labels; labels swap to resolved names within ~50ms.
+    if (root.pinCandidates.length > 0) {
+      var classes = []
+      for (var i = 0; i < root.pinCandidates.length; i++) {
+        var c = root.pinCandidates[i]
+        var key = c.cls || c.appId
+        if (key) classes.push(key)
+      }
+      if (classes.length > 0) {
+        resolveProcess.command = [root.pinTool, "--resolve-windows"].concat(classes)
+        resolveProcess.running = true
+      }
+    }
   }
 
   function closePinMenu() {
     root.pinMenuOpen = false
+  }
+
+  // Resolves human-readable names for pin menu candidates. The QML side
+  // can't scan .desktop files efficiently, so it delegates to the pin tool
+  // which already has the lookup chain (StartupWMClass → Exec basename →
+  // URL host).
+  Process {
+    id: resolveProcess
+    stdout: StdioCollector {
+      onStreamFinished: {
+        const lines = this.text.trim().split("\n")
+        const resolved = {}
+        for (const line of lines) {
+          const parts = line.split("\t")
+          if (parts.length >= 2) resolved[parts[1]] = parts[0]
+        }
+        const updated = []
+        for (const c of root.pinCandidates) {
+          const name = resolved[c.cls] || resolved[c.appId] || c.label
+          updated.push({ label: name, cls: c.cls, appId: c.appId })
+        }
+        root.pinCandidates = updated
+      }
+    }
   }
 
   function runPinAction(entry) {
@@ -483,7 +557,7 @@ PanelWindow {
     if (!app) return
 
     if (act === "new") {
-      Quickshell.execDetached(app.cmd.split(/\s+/))
+      Quickshell.execDetached(root.execTokenize(app.cmd))
     } else if (act === "quit") {
       for (const t of root.getToplevelsForApp(app)) {
         let addr = t.toplevel.lastIpcObject?.address
@@ -784,7 +858,7 @@ PanelWindow {
                 root.closeContextMenu()
                 return
               }
-              var cmdParts = appItem.cmd.split(/\s+/)
+              var cmdParts = root.execTokenize(appItem.cmd)
               if (appItem.isRunning) {
                 var minimizable = appItem.minimizable
                 if (minimizable) {

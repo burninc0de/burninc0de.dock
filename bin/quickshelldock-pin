@@ -324,6 +324,56 @@ unpick() {
 
 # A removed config app is not on the dock any more, so it cannot be
 # right-clicked back. This is the way home.
+# Resolve a running window's class/appId to a human-readable Name via
+# the same lookup chain as pin_window: StartupWMClass, Exec basename,
+# URL host. Falls back to the raw class.
+resolve_name() {
+  local key="${1,,}" dir file wm exec_bin exec_line host
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      wm=$(entry_key "$file" StartupWMClass)
+      [[ $wm == *@@* || $wm == *%* ]] && wm=""
+      [[ ${wm,,} == "$key" ]] && { entry_key "$file" Name; return 0; }
+    done
+  done < <(desktop_dirs)
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      exec_bin=$(entry_key "$file" Exec | awk '{print $1}' | sed 's:.*/::')
+      [[ ${exec_bin,,} == "$key" ]] && { entry_key "$file" Name; return 0; }
+    done
+  done < <(desktop_dirs)
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      exec_line=$(entry_key "$file" Exec)
+      if [[ "$exec_line" =~ https?://([^/[:space:]\":]+) ]]; then
+        host="${BASH_REMATCH[1],,}"
+        if [[ "$key" == *"$host"* ]]; then
+          entry_key "$file" Name; return 0
+        fi
+      fi
+    done
+  done < <(desktop_dirs)
+  echo "$1"
+  return 1
+}
+
+resolve_windows() {
+  # Batch-resolve classes (as arguments) to tab-separated name\tclass.
+  # One process, one scan of .desktop dirs.
+  local key name
+  for arg in "$@"; do
+    key="$arg"
+    name=$(resolve_name "$key" || true)
+    printf '%s\t%s\n' "$name" "$key"
+  done
+}
+
 restore_pick() {
   require_picker
   local options selection name
@@ -348,6 +398,7 @@ Usage: quickshelldock-pin <desktop-id>          Pin an app
        quickshelldock-pin --list                List pinned apps
        quickshelldock-pin --list-hidden         List removed config apps
        quickshelldock-pin --pinned <desktop-id> Exit 0 if pinned, 1 if not
+       quickshelldock-pin --resolve-windows     Read classes from stdin, write name\tclass to stdout
 
 Pins are stored in $XDG_STATE_HOME/omarchy/burninc0de.dock/pins.json and merge on top
 of config/UserConfig.qml. Unpinning an app that came from UserConfig.qml
@@ -367,6 +418,7 @@ case "${1-}" in
   --pick) pick ;;
   --unpick) unpick ;;
   --restore-pick) restore_pick ;;
+  --resolve-windows) shift; resolve_windows "$@" ;;
   -*) die "unknown option: $1" ;;
   *) pin "$1" ;;
 esac
