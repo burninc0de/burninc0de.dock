@@ -454,6 +454,7 @@ PanelWindow {
 
   function closeContextMenu() {
     root.contextOpen = false
+    if (!root.mouseOverDockArea) root.scheduleHide()
   }
 
   // Running apps that no dock icon claims, deduped by class/appId. A toplevel
@@ -568,6 +569,7 @@ PanelWindow {
   function closePinMenu() {
     root.pinMenuOpen = false
     root.pinMenuExpanded = false
+    if (!root.mouseOverDockArea) root.scheduleHide()
   }
 
   // One-time desktop Name cache. Built at startup so first pin-menu open
@@ -1102,6 +1104,7 @@ PanelWindow {
     hoverDelayTimer.stop()
     hoverCloseTimer.stop()
     hoverMenuOpen = false
+    if (!root.mouseOverDockArea) root.scheduleHide()
   }
 
   Item {
