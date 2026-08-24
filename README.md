@@ -4,6 +4,8 @@
 
 An auto-hiding dock for [Omarchy](https://omarchy.org/), built on Quickshell. Launches your pinned apps, tracks running windows, and most importantly **gets out of your way** when you don't need it. Instead of a timer or hover toggle, hide/show is driven by what's actually on your workspace: empty workspace → dock is visible. Windows present → dock hides. Event-driven, workspace-aware.
 
+Stealth Dock never reserves screen real estate: no exclusive zone, no layout negotiation, so panels don't jump and maximized windows don't shrink when it shows or hides — nothing on your screen ever moves because of this dock. It's just there, precisely when you need it, and gone when you don't.
+
 The scope is deliberately tight: no window thumbnails, no subprocess tracking. Just a fast launcher that knows when to be there and when to vanish — with icons you can drag into whatever order you like.
 
 ## Install (Omarchy)
