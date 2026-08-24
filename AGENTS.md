@@ -40,7 +40,7 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
 - The Repeater is backed by a `ListModel` (`appModel`), not a plain JS array — a `move()` keeps the delegates alive
   mid-drag, whereas reassigning an array model recreates them and kills the active `DragHandler`
 - `DockApps.apps` is the baseline order; `order.json` under `Quickshell.env("XDG_STATE_HOME")` (falling back to
-  `~/.local/state`) + `/omarchy/stealthdock` overrides it and is rewritten on drag release
+  `~/.local/state`) + `/omarchy/burninc0de.dock` overrides it and is rewritten on drag release (legacy `quickshelldock`/`omarchy/dock`/`omarchy/stealthdock` auto-migrated)
 - The dragged icon's `Translate.x` is bound to `dragPointerX - dragGrabOffset - appItem.x`. Reading the live,
   Row-assigned `appItem.x` is what keeps the icon under the cursor when a reorder relayouts the row mid-drag
 - Pointer positions are read from `centroid.scenePosition` and mapped with `row.mapFromItem(null, ...)`;

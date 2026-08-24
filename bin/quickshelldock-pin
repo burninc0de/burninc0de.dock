@@ -9,8 +9,8 @@
 
 set -euo pipefail
 
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/stealthdock"
-LEGACY_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/quickshelldock"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/burninc0de.dock"
+LEGACY_DIRS=("${XDG_STATE_HOME:-$HOME/.local/state}/quickshelldock" "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/dock" "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/stealthdock")
 PINS_FILE="$STATE_DIR/pins.json"
 # Apps declared in UserConfig.qml can't be removed by editing pins.json, and
 # rewriting the user's hand-written QML is not this tool's business. They get
@@ -18,15 +18,17 @@ PINS_FILE="$STATE_DIR/pins.json"
 HIDDEN_FILE="$STATE_DIR/hidden.json"
 
 migrate_legacy_state() {
-  # Migrate from legacy top-level quickshelldock dir to new omarchy/stealthdock.
-  # Only copies files that don't already exist at the new location.
-  [[ "$LEGACY_STATE_DIR" == "$STATE_DIR" ]] && return 0
-  [[ -d "$LEGACY_STATE_DIR" ]] || return 0
+  # Migrate from any legacy locations (quickshelldock, omarchy/dock,
+  # omarchy/stealthdock) to the final omarchy/burninc0de.dock.
   mkdir -p "$STATE_DIR"
-  for f in pins.json hidden.json order.json; do
-    if [[ -f "$LEGACY_STATE_DIR/$f" && ! -e "$STATE_DIR/$f" ]]; then
-      cp -n -- "$LEGACY_STATE_DIR/$f" "$STATE_DIR/$f" 2>/dev/null || cp -- "$LEGACY_STATE_DIR/$f" "$STATE_DIR/$f" 2>/dev/null || true
-    fi
+  for legacy in "${LEGACY_DIRS[@]}"; do
+    [[ "$legacy" == "$STATE_DIR" ]] && continue
+    [[ -d "$legacy" ]] || continue
+    for f in pins.json hidden.json order.json; do
+      if [[ -f "$legacy/$f" && ! -e "$STATE_DIR/$f" ]]; then
+        cp -n -- "$legacy/$f" "$STATE_DIR/$f" 2>/dev/null || cp -- "$legacy/$f" "$STATE_DIR/$f" 2>/dev/null || true
+      fi
+    done
   done
 }
 migrate_legacy_state
@@ -326,7 +328,7 @@ Usage: quickshelldock-pin <desktop-id>          Pin an app
        quickshelldock-pin --list-hidden         List removed config apps
        quickshelldock-pin --pinned <desktop-id> Exit 0 if pinned, 1 if not
 
-Pins are stored in $XDG_STATE_HOME/omarchy/stealthdock/pins.json and merge on top
+Pins are stored in $XDG_STATE_HOME/omarchy/burninc0de.dock/pins.json and merge on top
 of config/UserConfig.qml. Unpinning an app that came from UserConfig.qml
 records it in hidden.json instead of editing your QML; --restore undoes that.
 USAGE

@@ -62,14 +62,18 @@ PanelWindow {
   readonly property bool dragging: dragName !== ""
 
   // Icon order survives restarts here. Kept out of the config dir so a
-  // git pull never fights with it. State lives under XDG_STATE_HOME/omarchy/stealthdock
-  // (i.e. ~/.local/state/omarchy/stealthdock) — namespaced under omarchy/ per
-  // convention and using the product name to avoid collisions with other docks.
+  // git pull never fights with it. State lives under XDG_STATE_HOME/omarchy/burninc0de.dock
+  // (i.e. ~/.local/state/omarchy/burninc0de.dock) — namespaced under omarchy/
+  // and using the plugin id so it's 100% collision-free.
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME")
-    || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/stealthdock"
-  // Legacy top-level dir before the omarchy/stealthdock namespacing — migrated on startup.
+    || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/burninc0de.dock"
+  // Legacy locations before the final burninc0de.dock namespacing — migrated on startup.
   readonly property string legacyStateDir: (Quickshell.env("XDG_STATE_HOME")
     || (Quickshell.env("HOME") + "/.local/state")) + "/quickshelldock"
+  readonly property string legacyStateDir2: (Quickshell.env("XDG_STATE_HOME")
+    || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/dock"
+  readonly property string legacyStateDir3: (Quickshell.env("XDG_STATE_HOME")
+    || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/stealthdock"
   readonly property string orderPath: stateDir + "/order.json"
   readonly property string pinsPath: stateDir + "/pins.json"
   readonly property string hiddenPath: stateDir + "/hidden.json"
@@ -126,10 +130,10 @@ PanelWindow {
 
   Process {
     id: mkdirProcess
-    // Ensures the new state dir exists and migrates any files from the legacy
-    // top-level quickshelldock dir. Only copies files that don't already exist
-    // so a fresh install never clobbers user data.
-    command: ["sh", "-c", "mkdir -p \"$1\"; if [ -d \"$2\" ]; then for f in order.json pins.json hidden.json; do [ -f \"$2/$f\" ] && [ ! -e \"$1/$f\" ] && cp -n -- \"$2/$f\" \"$1/$f\" 2>/dev/null; done; fi", "sh", root.stateDir, root.legacyStateDir]
+    // Ensures the new state dir exists and migrates any files from legacy
+    // locations (quickshelldock, omarchy/dock, omarchy/stealthdock). Only copies
+    // files that don't already exist so a fresh install never clobbers data.
+    command: ["sh", "-c", "mkdir -p \"$1\"; for legacy in \"$2\" \"$3\" \"$4\"; do if [ -d \"$legacy\" ]; then for f in order.json pins.json hidden.json; do [ -f \"$legacy/$f\" ] && [ ! -e \"$1/$f\" ] && cp -n -- \"$legacy/$f\" \"$1/$f\" 2>/dev/null; done; fi; done", "sh", root.stateDir, root.legacyStateDir, root.legacyStateDir2, root.legacyStateDir3]
     running: true
   }
 
