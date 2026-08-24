@@ -112,6 +112,13 @@ PanelWindow {
   property bool pinMenuExpanded: false
   readonly property bool pinMenuHasMore: pinCandidates.length > pinMenuPageSize
   readonly property var pinMenuVisibleCandidates: pinMenuExpanded ? pinCandidates : pinCandidates.slice(0, pinMenuPageSize)
+  // Lazy one-time desktop Name cache: class/appId/host (lowercased) → Name.
+  // Built on first pin-menu open so the menu is synchronous after. Null =
+  // not yet loaded.
+  property var desktopNameMap: null
+  property bool desktopMapLoading: false
+  property real pendingPinAnchorX: 0
+  property bool pendingPinOpen: false
 
   // Matches what other docks offer: GNOME's dash-to-dock, the macOS Dock and
   // KDE's task manager all agree on new-window / pin-unpin / quit. Window
@@ -450,7 +457,9 @@ PanelWindow {
   }
 
   // Running apps that no dock icon claims, deduped by class/appId. A toplevel
-  // counts as claimed when any configured or pinned app matches it.
+  // counts as claimed when any configured or pinned app matches it. Labels
+  // are resolved synchronously via desktopNameMap (cached) so the menu
+  // opens with correct names and no flash.
   function buildPinCandidates() {
     let claimed = []
     for (let i = 0; i < appModel.count; i++) {
@@ -460,6 +469,7 @@ PanelWindow {
     }
     const seen = {}
     const out = []
+    const map = root.desktopNameMap
     for (const tl of Hyprland.toplevels.values) {
       if (claimed.indexOf(tl) >= 0) continue
       const cls = tl.lastIpcObject?.class ?? ""
@@ -467,8 +477,26 @@ PanelWindow {
       const key = cls || aid
       if (!key || seen[key]) continue
       seen[key] = true
-      out.push({ label: key, cls: cls, appId: aid })
+      let label = key
+      if (map) {
+        const lower = key.toLowerCase()
+        // Direct class/appId match
+        if (map[lower]) label = map[lower]
+        else {
+          // For chrome-host webapps also try host substring (e.g. google.com)
+          const m = lower.match(/chrome-([^_]+)/)
+          if (m && map[m[1]]) label = map[m[1]]
+        }
+        // Final fallback: window title is more readable than raw class
+        if (label === key) {
+          const title = (tl.title || "").trim()
+          if (title && title.length < 60) label = title
+        }
+      }
+      out.push({ label: label, cls: cls, appId: aid })
     }
+    // Stable alphabetical order so the list does not reshuffle after resolve.
+    out.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()))
     return out
   }
 
@@ -503,21 +531,35 @@ PanelWindow {
     }
     root.closeContextMenu()
     root.closeHoverMenu()
+    // Lazy one-time map: first open builds the cache, then reopens.
+    if (root.desktopNameMap === null) {
+      if (!root.desktopMapLoading) {
+        root.desktopMapLoading = true
+        root.pendingPinAnchorX = xInBar
+        root.pendingPinOpen = true
+        desktopMapProcess.running = true
+      } else {
+        // Already loading (started at init) — queue this open.
+        root.pendingPinAnchorX = xInBar
+        root.pendingPinOpen = true
+      }
+      return
+    }
     root.pinCandidates = root.buildPinCandidates()
     root.pinMenuAnchorX = xInBar
     root.pinMenuExpanded = false
     root.pinMenuOpen = true
-    // Resolve human-readable names in background. Menu opens immediately
-    // with class labels; labels swap to resolved names within ~50ms.
+    // Cache miss fallback: a desktop file created after the map was built
+    // will still have a raw label; resolve just those in background.
     if (root.pinCandidates.length > 0) {
-      var classes = []
+      var misses = []
       for (var i = 0; i < root.pinCandidates.length; i++) {
         var c = root.pinCandidates[i]
         var key = c.cls || c.appId
-        if (key) classes.push(key)
+        if (key && c.label === key) misses.push(key)
       }
-      if (classes.length > 0) {
-        resolveProcess.command = [root.pinTool, "--resolve-windows"].concat(classes)
+      if (misses.length > 0) {
+        resolveProcess.command = [root.pinTool, "--resolve-windows"].concat(misses)
         resolveProcess.running = true
       }
     }
@@ -528,10 +570,35 @@ PanelWindow {
     root.pinMenuExpanded = false
   }
 
-  // Resolves human-readable names for pin menu candidates. The QML side
-  // can't scan .desktop files efficiently, so it delegates to the pin tool
-  // which already has the lookup chain (StartupWMClass → Exec basename →
-  // URL host).
+  // One-time desktop Name cache. Built at startup so first pin-menu open
+  // is synchronous (no flash, no stutter). Also used as fallback if a
+  // later menu opens before the map is ready.
+  Process {
+    id: desktopMapProcess
+    command: [root.pinTool, "--dump-map"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        const map = {}
+        for (const line of this.text.trim().split("\n")) {
+          if (!line) continue
+          const parts = line.split("\t")
+          if (parts.length >= 2) map[parts[0]] = parts[1]
+        }
+        root.desktopNameMap = map
+        root.desktopMapLoading = false
+        if (root.pendingPinOpen) {
+          root.pendingPinOpen = false
+          root.pinCandidates = root.buildPinCandidates()
+          root.pinMenuAnchorX = root.pendingPinAnchorX
+          root.pinMenuExpanded = false
+          root.pinMenuOpen = true
+        }
+      }
+    }
+  }
+
+  // Fallback per-open resolver for cache misses (e.g. a desktop file
+  // created after the map was built). Kept for correctness, rarely hit.
   Process {
     id: resolveProcess
     stdout: StdioCollector {
@@ -548,6 +615,10 @@ PanelWindow {
           updated.push({ label: name, cls: c.cls, appId: c.appId })
         }
         root.pinCandidates = updated
+        // Also backfill the cache so next open is instant.
+        if (root.desktopNameMap) {
+          for (const k in resolved) root.desktopNameMap[k.toLowerCase()] = resolved[k]
+        }
       }
     }
   }
@@ -629,6 +700,12 @@ PanelWindow {
     readStateFile("hidden", root.hiddenPath)
     rebuildModel()
     updateWorkspaceEmpty()
+    // Build desktop Name cache in background so first pin-menu open is
+    // synchronous (no flash, no stutter).
+    if (root.desktopNameMap === null && !root.desktopMapLoading) {
+      root.desktopMapLoading = true
+      desktopMapProcess.running = true
+    }
   }
 
   Connections {

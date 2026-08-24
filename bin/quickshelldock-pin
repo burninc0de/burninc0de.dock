@@ -374,6 +374,43 @@ resolve_windows() {
   done
 }
 
+dump_map() {
+  # Dump every class/appId → Name mapping the resolver knows about.
+  # Used by the dock to build a one-time cache so pin-menu labels are
+  # synchronous after the first open. First match wins (XDG order).
+  declare -A seen=()
+  local dir file name wm exec_bin exec_line host key
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      name=$(entry_key "$file" Name)
+      [[ -n "$name" ]] || continue
+      wm=$(entry_key "$file" StartupWMClass)
+      [[ $wm == *@@* || $wm == *%* ]] && wm=""
+      if [[ -n "$wm" ]]; then
+        key="${wm,,}"
+        [[ -n ${seen[$key]:-} ]] || { seen[$key]=1; printf '%s\t%s\n' "$key" "$name"; }
+      fi
+      exec_bin=$(entry_key "$file" Exec | awk '{print $1}' | sed 's:.*/::')
+      if [[ -n "$exec_bin" ]]; then
+        key="${exec_bin,,}"
+        [[ -n ${seen[$key]:-} ]] || { seen[$key]=1; printf '%s\t%s\n' "$key" "$name"; }
+      fi
+      exec_line=$(entry_key "$file" Exec)
+      if [[ "$exec_line" =~ https?://([^/[:space:]\":]+) ]]; then
+        host="${BASH_REMATCH[1],,}"
+        # chrome-host is "chrome-<host>__-Default", match on host substring
+        key="$host"
+        [[ -n ${seen[$key]:-} ]] || { seen[$key]=1; printf '%s\t%s\n' "$key" "$name"; }
+        # also the full chrome- synthetic class for exact match
+        key="chrome-${host}__-default"
+        [[ -n ${seen[$key]:-} ]] || { seen[$key]=1; printf '%s\t%s\n' "$key" "$name"; }
+      fi
+    done
+  done < <(desktop_dirs)
+}
+
 restore_pick() {
   require_picker
   local options selection name
@@ -398,7 +435,8 @@ Usage: quickshelldock-pin <desktop-id>          Pin an app
        quickshelldock-pin --list                List pinned apps
        quickshelldock-pin --list-hidden         List removed config apps
        quickshelldock-pin --pinned <desktop-id> Exit 0 if pinned, 1 if not
-       quickshelldock-pin --resolve-windows     Read classes from stdin, write name\tclass to stdout
+       quickshelldock-pin --resolve-windows     Resolve classes (as args), write name\tclass to stdout
+       quickshelldock-pin --dump-map            Dump all class→Name mappings (for dock cache)
 
 Pins are stored in $XDG_STATE_HOME/omarchy/burninc0de.dock/pins.json and merge on top
 of config/UserConfig.qml. Unpinning an app that came from UserConfig.qml
@@ -419,6 +457,7 @@ case "${1-}" in
   --unpick) unpick ;;
   --restore-pick) restore_pick ;;
   --resolve-windows) shift; resolve_windows "$@" ;;
+  --dump-map) dump_map ;;
   -*) die "unknown option: $1" ;;
   *) pin "$1" ;;
 esac
