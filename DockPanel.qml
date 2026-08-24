@@ -429,6 +429,31 @@ PanelWindow {
     return out
   }
 
+  // Resolves an icon name for the pin menu. Webapps report a synthetic class
+  // like chrome-web.whatsapp.com__-Default which has no icon theme entry;
+  // the host's second-level domain (whatsapp) does. Fall back to that so the
+  // menu doesn't show a blank icon while the pinned dock icon (resolved via
+  // the desktop file) will be correct.
+  function pinCandidateIcon(entry) {
+    if (entry.empty) return ""
+    const raw = entry.cls || entry.appId || ""
+    if (!raw) return ""
+    const lower = raw.toLowerCase()
+    if (lower.includes("whatsapp")) return "whatsapp"
+    const m = lower.match(/chrome-([^_]+)/)
+    if (m) {
+      const host = m[1]
+      const parts = host.split(".")
+      const ignore = ["www", "com", "net", "org", "io", "co", "app", "chrome"]
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const p = parts[i]
+        if (!p || ignore.includes(p)) continue
+        return p
+      }
+    }
+    return raw
+  }
+
   function openPinMenu(xInBar) {
     if (root.pinMenuOpen) {
       root.closePinMenu()
@@ -1156,7 +1181,7 @@ PanelWindow {
               spacing: 8
 
               Image {
-                source: modelData.empty ? "" : Quickshell.iconPath(modelData.cls || modelData.appId, true)
+                source: modelData.empty ? "" : Quickshell.iconPath(root.pinCandidateIcon(modelData), true)
                 width: 16
                 height: 16
                 visible: !modelData.empty

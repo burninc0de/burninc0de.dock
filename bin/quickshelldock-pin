@@ -118,7 +118,7 @@ is_pinned() {
 }
 
 pin() {
-  local id="$1" file name icon exec_line cmd app_id
+  local id="$1" window_class="${2-}" file name icon exec_line cmd app_id
 
   file=$(find_desktop "$id") || die "no desktop entry named '$id'"
 
@@ -131,6 +131,12 @@ pin() {
   icon=$(entry_key "$file" Icon)
   exec_line=$(entry_key "$file" Exec)
   app_id=$(entry_key "$file" StartupWMClass)
+  # For omarchy webapps the desktop has no StartupWMClass but the window
+  # class is chrome-host__-Default. When pinning from a running window, use
+  # the window class as appId so the dock can match the window afterwards.
+  if [[ -z "$app_id" && -n "$window_class" ]]; then
+    app_id="$window_class"
+  fi
 
   [[ -n $exec_line ]] || die "$id has no Exec= line"
   cmd=$(printf '%s' "$exec_line" | strip_field_codes)
@@ -172,9 +178,9 @@ unpin() {
 
 # A running window only knows its class/appId, not its desktop entry. Find
 # whichever entry claims that class: StartupWMClass beats an Exec basename
-# match, XDG order breaks remaining ties.
+# match, then omarchy webapp URL host, XDG order breaks remaining ties.
 find_desktop_for_window() {
-  local key="${1,,}" dir file wm exec_bin
+  local key="${1,,}" dir file wm exec_bin exec_line host
   while IFS= read -r dir; do
     [[ -d "$dir" ]] || continue
     for file in "$dir"/*.desktop; do
@@ -192,12 +198,27 @@ find_desktop_for_window() {
       [[ ${exec_bin,,} == "$key" ]] && { basename "$file" .desktop; return 0; }
     done
   done < <(desktop_dirs)
+  # Omarchy webapps: Exec contains https://host, class is chrome-host__-Default
+  # e.g. Exec=omarchy-launch-webapp https://web.whatsapp.com/ vs class=chrome-web.whatsapp.com__-Default
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    for file in "$dir"/*.desktop; do
+      [[ -e "$file" ]] || continue
+      exec_line=$(entry_key "$file" Exec)
+      if [[ "$exec_line" =~ https?://([^/[:space:]\":]+) ]]; then
+        host="${BASH_REMATCH[1],,}"
+        if [[ "$key" == *"$host"* ]]; then
+          basename "$file" .desktop; return 0
+        fi
+      fi
+    done
+  done < <(desktop_dirs)
   return 1
 }
 
 # Dock-menu path: pin straight from a running window. Native Wayland apps
 # often report an app-id equal to their desktop file id, so try that first,
-# then whichever entry claims the class via StartupWMClass/Exec. Otherwise
+# then whichever entry claims the class via StartupWMClass/Exec/host. Otherwise
 # pin blind, which works whenever the binary is on PATH.
 pin_window() {
   local key="$1" id
@@ -207,7 +228,7 @@ pin_window() {
   if find_desktop "$key" >/dev/null 2>&1; then
     pin "$key"
   elif id=$(find_desktop_for_window "$key"); then
-    pin "$id"
+    pin "$id" "$key"
   else
     is_pinned "$key" && { echo "already pinned: $key"; return 0; }
     read_pins | jq \
