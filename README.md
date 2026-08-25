@@ -2,11 +2,15 @@
 
 <img width="1600" height="1000" alt="Stealth Dock preview" src="preview.png" />
 
-An auto-hiding dock for [Omarchy](https://omarchy.org/), built on Quickshell. Launches your pinned apps, tracks running windows, and most importantly **gets out of your way** when you don't need it. Instead of a timer or hover toggle, hide/show is driven by what's actually on your workspace: empty workspace → dock is visible. Windows present → dock hides. Event-driven, workspace-aware.
+A minimal auto-hiding dock for [Omarchy](https://omarchy.org/), built on Quickshell — a shelf for launching apps when your hands want a mouse instead of a keybind. It runs by three rules:
 
-*Stealth Dock* never reserves screen real estate: no exclusive zone, no layout negotiation, so panels don't jump and maximized windows don't shrink when it shows or hides — nothing on your screen ever moves because of this dock. It's just there, precisely when you need it, and gone when you don't.
+**Show up only when there's nothing to do.** Visibility is driven by your workspace, not by timers or hover zones: empty workspace → dock is visible, windows present → it's gone. Fully event-driven — Hyprland tells it what changed, it never polls.
 
-The scope is deliberately tight: no window thumbnails, no subprocess tracking. Just a fast launcher that knows when to be there and when to vanish — with icons you can drag into whatever order you like.
+**Never disturb the layout.** No exclusive zone, no layout negotiation. Panels don't jump, maximized windows don't shrink — nothing on your screen ever moves because of this dock.
+
+**Hold only what you put on it.** Running-but-unpinned apps never appear on their own, so every icon sits exactly where you left it until you move it. On a tiling desktop your workspaces already *are* the running-app list — this is just a shelf for the moments when you'd rather click than type.
+
+The scope stays deliberately tight: launch, focus, minimize, pin, reorder. No window thumbnails, no subprocess tracking, no animations for their own sake.
 
 ## Install (Omarchy)
 
