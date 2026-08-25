@@ -4,7 +4,7 @@
 
 A minimal auto-hiding dock for [Omarchy](https://omarchy.org/), built on Quickshell — a shelf for launching apps when your hands want a mouse instead of a keybind. It runs by three rules:
 
-**Show up only when there's nothing to do.** Visibility is driven by your workspace, not by timers or hover zones: empty workspace → dock is visible, windows present → it's gone. Fully event-driven — Hyprland tells it what changed, it never polls.
+**Show up only when there's nothing to do.** Visibility follows your workspace: empty workspace → dock is visible, windows present → it's gone. Fully event-driven — Hyprland tells it what changed, it never polls. Hovering the bottom edge reveals it at any time as an override.
 
 **Never disturb the layout.** No exclusive zone, no layout negotiation. Panels don't jump, maximized windows don't shrink — nothing on your screen ever moves because of this dock.
 
