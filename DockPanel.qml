@@ -47,6 +47,7 @@ PanelWindow {
   property int itemSize: defaultItemSize
   property int itemSpacing: defaultItemSpacing
   readonly property real itemPitch: itemSize + itemSpacing
+  property bool hideOnEmpty: false
 
   property bool dockVisible: true
   property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered || contextHover.hovered || windowMenuHover.hovered || pinMenuHover.hovered || settingsHover.hovered
@@ -243,11 +244,13 @@ PanelWindow {
     const spacing = Math.round(Number(s.spacing))
     if (!isNaN(size)) itemSize = Math.max(32, Math.min(96, size))
     if (!isNaN(spacing)) itemSpacing = Math.max(0, Math.min(48, spacing))
+    if (typeof s.hideOnEmpty === "boolean") hideOnEmpty = s.hideOnEmpty
+    else if (typeof s.hideOnEmptyWorkspace === "boolean") hideOnEmpty = s.hideOnEmptyWorkspace
   }
 
   function persistSettings() {
     settingsFile.setText(JSON.stringify(
-      { iconSize: itemSize, spacing: itemSpacing }, null, 2) + "\n")
+      { iconSize: itemSize, spacing: itemSpacing, hideOnEmpty: hideOnEmpty }, null, 2) + "\n")
   }
 
   // Write-only handle for drag order. Never loaded, so nothing from disk is
@@ -695,7 +698,7 @@ PanelWindow {
     const key = entry.cls || entry.appId
     if (!key) return
     Quickshell.execDetached([root.pinTool, "--pin-window", key])
-    if (!root.workspaceEmpty) root.dockVisible = false
+    if (!root.workspaceEmpty || root.hideOnEmpty) root.dockVisible = false
   }
 
   function runContextAction(act) {
@@ -718,7 +721,7 @@ PanelWindow {
       Quickshell.execDetached([root.pinTool, "--unpin", root.contextKey])
       // The icon is gone and the pointer sits on now-empty bar; without this
       // the hover handoff keeps the dock up indefinitely.
-      if (!root.workspaceEmpty) root.dockVisible = false
+      if (!root.workspaceEmpty || root.hideOnEmpty) root.dockVisible = false
     }
   }
 
@@ -733,7 +736,8 @@ PanelWindow {
   }
 
   function scheduleHide() {
-    if (!workspaceEmpty) hideTimer.restart()
+    if (workspaceEmpty && !hideOnEmpty) return
+    hideTimer.restart()
   }
 
   onMouseOverDockAreaChanged: {
@@ -747,12 +751,27 @@ PanelWindow {
       hoverCloseTimer.restart()
       pinMenuCloseTimer.restart()
       settingsCloseTimer.restart()
+      scheduleHide()
     }
   }
 
   onWorkspaceEmptyChanged: {
-    if (workspaceEmpty) showDockBar()
+    if (workspaceEmpty && !hideOnEmpty) showDockBar()
     else scheduleHide()
+  }
+
+  onHideOnEmptyChanged: {
+    if (hideOnEmpty) {
+      if (workspaceEmpty) {
+        if (mouseOverDockArea || dragging || contextOpen || hoverMenuOpen || pinMenuOpen || settingsOpen) scheduleHide()
+        else {
+          hideTimer.stop()
+          dockVisible = false
+        }
+      }
+    } else {
+      if (workspaceEmpty) showDockBar()
+    }
   }
 
   onContextOpenChanged: {
@@ -822,7 +841,7 @@ PanelWindow {
     interval: 500
     repeat: false
     onTriggered: {
-      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging || root.contextOpen || root.hoverMenuOpen || root.pinMenuOpen || root.settingsOpen) return
+      if ((root.workspaceEmpty && !root.hideOnEmpty) || root.mouseOverDockArea || root.dragging || root.contextOpen || root.hoverMenuOpen || root.pinMenuOpen || root.settingsOpen) return
       root.dockVisible = false
     }
   }
@@ -1729,6 +1748,58 @@ PanelWindow {
           }
         }
 
+        Item {
+          width: parent.width
+          height: 22
+
+          TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onSingleTapped: {
+              root.hideOnEmpty = !root.hideOnEmpty
+              root.persistSettings()
+            }
+          }
+
+          Text {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Show on empty workspace"
+            textFormat: Text.PlainText
+            color: Color.menu.text
+            font.pixelSize: 12
+          }
+
+          Rectangle {
+            id: hideToggleTrack
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: 34
+            height: 18
+            radius: 9
+            color: !root.hideOnEmpty ? Color.foreground : Qt.alpha(Color.foreground, 0.25)
+            Behavior on color { ColorAnimation { duration: 150 } }
+
+            Rectangle {
+              x: !root.hideOnEmpty ? parent.width - width - 2 : 2
+              y: 2
+              width: 14
+              height: 14
+              radius: 7
+              color: Color.menu.background
+              Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            }
+          }
+        }
+
+        Text {
+          width: parent.width
+          text: "When off, dock stays hidden even on empty workspaces (reveal on hover)"
+          textFormat: Text.PlainText
+          color: Color.muted
+          font.pixelSize: 10
+          wrapMode: Text.WordWrap
+        }
+
         Rectangle {
           width: parent.width
           height: 1
@@ -1748,6 +1819,7 @@ PanelWindow {
             onSingleTapped: {
               root.itemSize = root.defaultItemSize
               root.itemSpacing = root.defaultItemSpacing
+              root.hideOnEmpty = false
               root.persistSettings()
             }
           }
