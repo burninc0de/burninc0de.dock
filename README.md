@@ -107,11 +107,6 @@ It reads the `.desktop` file for you, strips launcher field codes (`%U`, `%f`, �
 to `$XDG_STATE_HOME/omarchy/burninc0de.dock/pins.json` (`~/.local/state/omarchy/burninc0de.dock/pins.json` by default). The dock watches that file, so the icon appears immediately. Symlink
 the script into `~/.local/bin` to have it on `PATH`.
 
-**Pin from the Omarchy menu (Super+Space).** Run `integration/install-omarchy-menu-rightclick` once, then right-click
-any app in the menu to pin or unpin it. See [`integration/`](integration/) for what that touches and how to undo it.
-Without the patch you can still add a `Dock › Pin app to dock` row to `~/.config/omarchy/extensions/omarchy-menu.jsonc`
-pointing at `quickshelldock-pin --pick`, which needs no changes to Omarchy at all.
-
 **Pin straight from the dock.** Right-click any empty spot on the bar: every running app that isn't on the dock yet
 shows up in a small list — click one to pin it. Under the hood this uses `--pin-window`, which resolves the window's
 class/appId back to a desktop entry (by file id, `StartupWMClass` or `Exec` basename) so the pinned icon launches
@@ -148,9 +143,8 @@ bin/quickshelldock-pin --list-hidden
 bin/quickshelldock-pin --restore Obsidian
 ```
 
-Right-clicking the app in the Super+Space menu also restores it, as long as the dock's display name matches the
-desktop entry's `Name=`. Where you renamed it in `UserConfig.qml` — a "foot" entry labelled "Terminal", say — use
-`--restore` with the dock's name.
+If you renamed an app in `UserConfig.qml` — a "foot" entry labelled "Terminal", say — use `--restore` with the
+dock's display name, not the desktop entry's.
 
 ## Hover window list
 
@@ -200,7 +194,6 @@ The dock uses a two-tier approach: `Hyprland.toplevels` (fast, via `rawEvent`) c
 ├── DockPanel.qml        dock UI, auto-hide, window matching, menus
 ├── bin/
 │   └── quickshelldock-pin     pin/unpin CLI (sole writer of pin state)
-├── integration/               Omarchy Super+Space menu patch
 └── config/
     ├── DockApps.qml            config singleton
     ├── UserConfig.qml          your personal config (gitignored)
