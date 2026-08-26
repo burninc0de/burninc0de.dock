@@ -41,6 +41,9 @@ Hyprland dock panel built with Quickshell (QML). No build step — loaded direct
   mid-drag, whereas reassigning an array model recreates them and kills the active `DragHandler`
 - `DockApps.apps` is the baseline order; `order.json` under `Quickshell.env("XDG_STATE_HOME")` (falling back to
   `~/.local/state`) + `/omarchy/burninc0de.dock` overrides it and is rewritten on drag release (legacy `quickshelldock`/`omarchy/dock`/`omarchy/stealthdock` auto-migrated)
+- Icon size/spacing are user-tunable from the Settings panel (opened from the empty-space right-click menu) and
+  persist in `settings.json` in the same state dir. Unlike pins/hidden, only this process writes it, so its
+  `FileView` needs no watcher; it's still read through the shared `head -c` path and clamped at ingestion
 - The dragged icon's `Translate.x` is bound to `dragPointerX - dragGrabOffset - appItem.x`. Reading the live,
   Row-assigned `appItem.x` is what keeps the icon under the cursor when a reorder relayouts the row mid-drag
 - Pointer positions are read from `centroid.scenePosition` and mapped with `row.mapFromItem(null, ...)`;

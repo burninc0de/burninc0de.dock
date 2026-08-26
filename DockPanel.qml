@@ -2,6 +2,7 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import QtQuick
+import QtQuick.Controls.Basic
 import qs.Commons
 import "config"
 import Quickshell.Io
@@ -26,6 +27,7 @@ PanelWindow {
     Region { item: contextMenu }
     Region { item: windowMenu }
     Region { item: pinMenu }
+    Region { item: settingsPanel }
   }
 
   // The window is intentionally oversized so menus have room to grow above
@@ -38,12 +40,16 @@ PanelWindow {
   readonly property real gap: 6
   readonly property real elevationMargin: -3
 
-  readonly property int itemSize: 54
-  readonly property int itemSpacing: 12
+  // Icon geometry is user-tunable from the Settings panel; the defaults are
+  // also what "Reset" restores and what applies before settings.json loads.
+  readonly property int defaultItemSize: 54
+  readonly property int defaultItemSpacing: 12
+  property int itemSize: defaultItemSize
+  property int itemSpacing: defaultItemSpacing
   readonly property real itemPitch: itemSize + itemSpacing
 
   property bool dockVisible: true
-  property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered || contextHover.hovered || windowMenuHover.hovered || pinMenuHover.hovered
+  property bool mouseOverDockArea: triggerHover.hovered || dockHover.hovered || contextHover.hovered || windowMenuHover.hovered || pinMenuHover.hovered || settingsHover.hovered
   property bool workspaceEmpty: true
   property string clientsJson: ""
   property int _badgeTick: 0
@@ -78,6 +84,7 @@ PanelWindow {
   readonly property string orderPath: stateDir + "/order.json"
   readonly property string pinsPath: stateDir + "/pins.json"
   readonly property string hiddenPath: stateDir + "/hidden.json"
+  readonly property string settingsPath: stateDir + "/settings.json"
   // Resolved relative to this file, NOT Quickshell.shellDir: Omarchy loads
   // plugins into its own shell instance, so shellDir points at
   // /usr/share/omarchy/shell and every execDetached would silently no-op.
@@ -101,6 +108,9 @@ PanelWindow {
   property string hoverMenuKey: ""
   property var hoverMenuWindows: []
   property real hoverMenuAnchorX: 0
+
+  // Settings panel state (opened from the empty-space right-click menu).
+  property bool settingsOpen: false
 
   // Right-click-on-empty-space menu: running apps not already on the dock.
   property bool pinMenuOpen: false
@@ -202,8 +212,38 @@ PanelWindow {
     if (kind === "order") savedOrder = parseJsonArray(raw, "order.json")
     else if (kind === "pins") pinnedApps = parseJsonArray(raw, "pins.json")
     else if (kind === "hidden") hiddenApps = parseJsonArray(raw, "hidden.json")
+    else if (kind === "settings") {
+      applySettings(parseJsonObject(raw, "settings.json"))
+      return
+    }
     else return
     if (!dragging) rebuildModel()
+  }
+
+  function parseJsonObject(raw, label) {
+    try {
+      const parsed = JSON.parse(raw)
+      return (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : {}
+    } catch (e) {
+      if (raw.length >= root.maxStateBytes)
+        console.warn("quickshelldock:", label, "is at or over the",
+          root.maxStateBytes, "byte read ceiling; ignoring it")
+      return {}
+    }
+  }
+
+  // Clamped at ingestion like every other untrusted input: settings.json is
+  // user-writable, so a bogus value can only saturate, not break layout.
+  function applySettings(s) {
+    const size = Math.round(Number(s.iconSize))
+    const spacing = Math.round(Number(s.spacing))
+    if (!isNaN(size)) itemSize = Math.max(32, Math.min(96, size))
+    if (!isNaN(spacing)) itemSpacing = Math.max(0, Math.min(48, spacing))
+  }
+
+  function persistSettings() {
+    settingsFile.setText(JSON.stringify(
+      { iconSize: itemSize, spacing: itemSpacing }, null, 2) + "\n")
   }
 
   // Write-only handle for drag order. Never loaded, so nothing from disk is
@@ -236,6 +276,16 @@ PanelWindow {
     printErrors: false
     watchChanges: true
     onFileChanged: readStateFile("pins", root.pinsPath)
+  }
+
+  // Settings are written only by this process (Settings panel / reset), so
+  // unlike pins/hidden there is no external writer to watch for.
+  FileView {
+    id: settingsFile
+    path: root.settingsPath
+    preload: false
+    printErrors: false
+    atomicWrites: true
   }
 
 
@@ -572,6 +622,16 @@ PanelWindow {
     if (!root.mouseOverDockArea) root.scheduleHide()
   }
 
+  function openSettings() {
+    root.closePinMenu()
+    root.settingsOpen = true
+  }
+
+  function closeSettings() {
+    root.settingsOpen = false
+    if (!root.mouseOverDockArea) root.scheduleHide()
+  }
+
   // One-time desktop Name cache. Built at startup so first pin-menu open
   // is synchronous (no flash, no stutter). Also used as fallback if a
   // later menu opens before the map is ready.
@@ -676,10 +736,12 @@ PanelWindow {
       contextCloseTimer.stop()
       hoverCloseTimer.stop()
       pinMenuCloseTimer.stop()
+      settingsCloseTimer.stop()
     } else {
       contextCloseTimer.restart()
       hoverCloseTimer.restart()
       pinMenuCloseTimer.restart()
+      settingsCloseTimer.restart()
     }
   }
 
@@ -700,6 +762,7 @@ PanelWindow {
     readStateFile("order", root.orderPath)
     readStateFile("pins", root.pinsPath)
     readStateFile("hidden", root.hiddenPath)
+    readStateFile("settings", root.settingsPath)
     rebuildModel()
     updateWorkspaceEmpty()
     // Build desktop Name cache in background so first pin-menu open is
@@ -726,6 +789,7 @@ PanelWindow {
         updateWorkspaceEmpty()
         closeHoverMenu()
         closePinMenu()
+        closeSettings()
       }
       if (event.name === "windowtitle") {
         root._badgeTick++
@@ -753,7 +817,7 @@ PanelWindow {
     interval: 500
     repeat: false
     onTriggered: {
-      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging || root.contextOpen || root.hoverMenuOpen || root.pinMenuOpen) return
+      if (root.workspaceEmpty || root.mouseOverDockArea || root.dragging || root.contextOpen || root.hoverMenuOpen || root.pinMenuOpen || root.settingsOpen) return
       root.dockVisible = false
     }
   }
@@ -1029,8 +1093,9 @@ PanelWindow {
             id: iconImg
             anchors.centerIn: parent
             source: Quickshell.iconPath(appItem.icon, true)
-            width: 40
-            height: 40
+            // Tracks the Settings-panel size; 54 → 40 keeps the original look.
+            width: Math.round(root.itemSize * 40 / root.defaultItemSize)
+            height: width
             fillMode: Image.PreserveAspectFit
             opacity: appItem.isDragged ? 0.85 : 1
           }
@@ -1108,6 +1173,22 @@ PanelWindow {
     interval: 180
     repeat: false
     onTriggered: if (!root.mouseOverDockArea) root.closePinMenu()
+  }
+
+  Timer {
+    id: settingsCloseTimer
+    interval: 180
+    repeat: false
+    onTriggered: if (!root.mouseOverDockArea) root.closeSettings()
+  }
+
+  // Debounced write-through while a slider drags; one rename per gesture
+  // instead of one per pixel.
+  Timer {
+    id: settingsSaveTimer
+    interval: 400
+    repeat: false
+    onTriggered: root.persistSettings()
   }
 
   function closeHoverMenu() {
@@ -1294,35 +1375,40 @@ PanelWindow {
       // +42 covers the app-icon column and the right-aligned pin glyph;
       // capped like the other cards so long names elide instead of stretching.
       implicitWidth: Math.max(150, Math.min(pinWidthProbe.implicitWidth + 24 + 42, 320))
-      implicitHeight: pinFlick.height + 16
+      // +30: divider + Settings row under the list.
+      implicitHeight: pinCardColumn.implicitHeight + 16
 
       color: Color.menu.background
       radius: 10
       border.color: Qt.alpha(Color.foreground, 0.18)
       border.width: 1
 
-      Flickable {
-        id: pinFlick
+      Column {
+        id: pinCardColumn
         anchors.centerIn: parent
-        width: pinCard.width - 8
-        // Cap at 8 rows (8*26+7*1 = 215) so the card never outgrows the
-        // oversized window. Collapsed state shows 5 + "Show more" and fits
-        // without scrolling.
-        height: Math.min(pinColumn.implicitHeight, 215)
-        clip: true
-        contentHeight: pinColumn.implicitHeight
-        flickableDirection: Flickable.VerticalFlick
-        boundsBehavior: Flickable.StopAtBounds
+        spacing: 1
 
-        WheelHandler {
-          onWheel: event => {
-            if (pinFlick.contentHeight > pinFlick.height) {
-              const dy = event.angleDelta.y > 0 ? -40 : 40
-              pinFlick.contentY = Math.max(0, Math.min(pinFlick.contentHeight - pinFlick.height, pinFlick.contentY + dy))
-              event.accepted = true
+        Flickable {
+          id: pinFlick
+          width: pinCard.width - 8
+          // Cap at 8 rows (8*26+7*1 = 215) so the card never outgrows the
+          // oversized window. Collapsed state shows 5 + "Show more" and fits
+          // without scrolling.
+          height: Math.min(pinColumn.implicitHeight, 215)
+          clip: true
+          contentHeight: pinColumn.implicitHeight
+          flickableDirection: Flickable.VerticalFlick
+          boundsBehavior: Flickable.StopAtBounds
+
+          WheelHandler {
+            onWheel: event => {
+              if (pinFlick.contentHeight > pinFlick.height) {
+                const dy = event.angleDelta.y > 0 ? -40 : 40
+                pinFlick.contentY = Math.max(0, Math.min(pinFlick.contentHeight - pinFlick.height, pinFlick.contentY + dy))
+                event.accepted = true
+              }
             }
           }
-        }
 
         Column {
           id: pinColumn
@@ -1416,13 +1502,260 @@ PanelWindow {
         }
       }
 
-      Text {
-        id: pinWidthProbe
-        visible: false
-        text: "No unpinned apps running"
-        font.pixelSize: 12
+      Rectangle {
+        width: pinCard.width - 16
+        height: 1
+        color: Qt.alpha(Color.foreground, 0.12)
+      }
+
+      Rectangle {
+        width: pinCard.width - 8
+        height: 26
+        radius: 6
+        color: settingsRowHover.hovered ? Color.menu.selectedBackground : "transparent"
+
+        HoverHandler { id: settingsRowHover }
+
+        TapHandler {
+          acceptedButtons: Qt.LeftButton
+          onSingleTapped: root.openSettings()
+        }
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          x: 8
+          text: "Settings"
+          textFormat: Text.PlainText
+          color: Color.menu.text
+          font.pixelSize: 12
+        }
+
+        Text {
+          anchors.right: parent.right
+          anchors.rightMargin: 8
+          anchors.verticalCenter: parent.verticalCenter
+          // Cogwheel (nf-cod gear), same nerd font as the pin glyph.
+          text: ""
+          color: settingsRowHover.hovered ? Color.menu.text : Color.muted
+          font.pixelSize: 13
+        }
+      }
+    }
+
+    Text {
+      id: pinWidthProbe
+      visible: false
+      text: "No unpinned apps running"
+      font.pixelSize: 12
+    }
+  }
+  }
+
+  Item {
+    id: settingsPanel
+
+    width: root.settingsOpen ? settingsCard.width : 0
+    height: root.settingsOpen ? settingsCard.height : 0
+    visible: root.settingsOpen
+
+    anchors.bottom: dockBar.top
+    anchors.bottomMargin: 2
+    // Centered over the dock bar itself, not an anchor icon.
+    x: Math.max(0, Math.min(dockBar.x + (dockBar.width - width) / 2, root.width - width))
+
+    HoverHandler { id: settingsHover }
+
+    Rectangle {
+      id: settingsCard
+
+      implicitWidth: 230
+      implicitHeight: settingsColumn.implicitHeight + 24
+
+      color: Color.menu.background
+      radius: 10
+      border.color: Qt.alpha(Color.foreground, 0.18)
+      border.width: 1
+
+      Column {
+        id: settingsColumn
+        anchors.centerIn: parent
+        width: parent.width - 24
+        spacing: 10
+
+        Text {
+          text: "Dock settings"
+          textFormat: Text.PlainText
+          color: Color.menu.text
+          font.pixelSize: 13
+          font.bold: true
+        }
+
+        Column {
+          width: parent.width
+          spacing: 6
+
+          Item {
+            width: parent.width
+            height: 14
+            Text {
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Icon size"
+              textFormat: Text.PlainText
+              color: Color.muted
+              font.pixelSize: 12
+            }
+            Text {
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              text: sizeSlider.value + " px"
+              textFormat: Text.PlainText
+              color: Color.menu.text
+              font.pixelSize: 12
+            }
+          }
+
+          Slider {
+            id: sizeSlider
+            width: parent.width
+            from: 32
+            to: 96
+            stepSize: 2
+            value: root.itemSize
+            onMoved: {
+              root.itemSize = value
+              settingsSaveTimer.restart()
+            }
+
+            background: Rectangle {
+              x: sizeSlider.leftPadding
+              y: sizeSlider.topPadding + sizeSlider.availableHeight / 2 - height / 2
+              width: sizeSlider.availableWidth
+              height: 4
+              radius: 2
+              color: Qt.alpha(Color.foreground, 0.2)
+
+              Rectangle {
+                width: sizeSlider.visualPosition * parent.width
+                height: parent.height
+                radius: 2
+                color: Color.foreground
+              }
+            }
+
+            handle: Rectangle {
+              x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth - width / 2
+              y: sizeSlider.topPadding + sizeSlider.availableHeight / 2 - height / 2
+              width: 14
+              height: 14
+              radius: 7
+              color: Color.menu.text
+              border.color: Color.menu.background
+              border.width: 1
+            }
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: 6
+
+          Item {
+            width: parent.width
+            height: 14
+            Text {
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Icon spacing"
+              textFormat: Text.PlainText
+              color: Color.muted
+              font.pixelSize: 12
+            }
+            Text {
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              text: spacingSlider.value + " px"
+              textFormat: Text.PlainText
+              color: Color.menu.text
+              font.pixelSize: 12
+            }
+          }
+
+          Slider {
+            id: spacingSlider
+            width: parent.width
+            from: 0
+            to: 48
+            stepSize: 2
+            value: root.itemSpacing
+            onMoved: {
+              root.itemSpacing = value
+              settingsSaveTimer.restart()
+            }
+
+            background: Rectangle {
+              x: spacingSlider.leftPadding
+              y: spacingSlider.topPadding + spacingSlider.availableHeight / 2 - height / 2
+              width: spacingSlider.availableWidth
+              height: 4
+              radius: 2
+              color: Qt.alpha(Color.foreground, 0.2)
+
+              Rectangle {
+                width: spacingSlider.visualPosition * parent.width
+                height: parent.height
+                radius: 2
+                color: Color.foreground
+              }
+            }
+
+            handle: Rectangle {
+              x: spacingSlider.leftPadding + spacingSlider.visualPosition * spacingSlider.availableWidth - width / 2
+              y: spacingSlider.topPadding + spacingSlider.availableHeight / 2 - height / 2
+              width: 14
+              height: 14
+              radius: 7
+              color: Color.menu.text
+              border.color: Color.menu.background
+              border.width: 1
+            }
+          }
+        }
+
+        Rectangle {
+          width: parent.width
+          height: 1
+          color: Qt.alpha(Color.foreground, 0.12)
+        }
+
+        Rectangle {
+          width: parent.width
+          height: 22
+          radius: 6
+          color: resetHover.hovered ? Color.menu.selectedBackground : "transparent"
+
+          HoverHandler { id: resetHover }
+
+          TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onSingleTapped: {
+              root.itemSize = root.defaultItemSize
+              root.itemSpacing = root.defaultItemSpacing
+              root.persistSettings()
+            }
+          }
+
+          Text {
+            anchors.centerIn: parent
+            text: "Reset to defaults"
+            textFormat: Text.PlainText
+            color: Color.muted
+            font.pixelSize: 11
+          }
+        }
       }
     }
   }
 }
+
 

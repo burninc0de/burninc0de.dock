@@ -134,7 +134,9 @@ and KDE's task manager all share them:
 Window lists, thumbnails and "App Details" are deliberately absent — they belong to the scope this dock doesn't have.
 
 Right-clicking an **empty spot on the bar** instead of an icon opens a different menu: running apps that aren't
-pinned yet, ready to be pinned (see [Adding apps](#adding-apps)).
+pinned yet, ready to be pinned (see [Adding apps](#adding-apps)), plus a **Settings…** row. That opens a small panel
+with sliders for icon size and spacing; changes apply live and persist to `settings.json` in the state directory
+(`~/.local/state/omarchy/burninc0de.dock`), with a reset-to-defaults row at the bottom.
 
 Unpin works on every icon, wherever it came from. Apps pinned with the tool are dropped from `pins.json`; apps
 declared in `UserConfig.qml` are recorded in `hidden.json` instead, because rewriting your hand-written QML isn't the
