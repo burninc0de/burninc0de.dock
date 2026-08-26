@@ -111,6 +111,10 @@ PanelWindow {
 
   // Settings panel state (opened from the empty-space right-click menu).
   property bool settingsOpen: false
+  // Anchored to the right-click point that opened it, so it appears where the
+  // cursor already is instead of centering over the dock bar (which stranded
+  // the mouse in the dead zone and let the close timer dismiss it first).
+  property real settingsAnchorX: 0
 
   // Right-click-on-empty-space menu: running apps not already on the dock.
   property bool pinMenuOpen: false
@@ -622,8 +626,9 @@ PanelWindow {
     if (!root.mouseOverDockArea) root.scheduleHide()
   }
 
-  function openSettings() {
+  function openSettings(anchorX) {
     root.closePinMenu()
+    root.settingsAnchorX = anchorX
     root.settingsOpen = true
   }
 
@@ -1518,7 +1523,7 @@ PanelWindow {
 
         TapHandler {
           acceptedButtons: Qt.LeftButton
-          onSingleTapped: root.openSettings()
+          onSingleTapped: root.openSettings(root.pinMenuAnchorX)
         }
 
         Text {
@@ -1560,8 +1565,10 @@ PanelWindow {
 
     anchors.bottom: dockBar.top
     anchors.bottomMargin: 2
-    // Centered over the dock bar itself, not an anchor icon.
-    x: Math.max(0, Math.min(dockBar.x + (dockBar.width - width) / 2, root.width - width))
+    // Anchored to the right-click point that opened it (the pin menu's own
+    // anchor), so the cursor is already over the panel when it appears and it
+    // can't close before the user reaches it. Same clamp the other menus use.
+    x: Math.max(0, Math.min(dockBar.x + root.settingsAnchorX - width / 2, root.width - width))
 
     HoverHandler { id: settingsHover }
 
