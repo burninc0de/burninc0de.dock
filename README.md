@@ -59,7 +59,7 @@ exactly as it was. Delete that folder for a factory reset. If you are updating f
 
 ## Adding & removing apps
 
-There are four ways to get an app onto the dock, in increasing order of convenience. Day-to-day use is the dock UI; the text config is the declarative base that survives a reinstall.
+There are four ways to get an app onto the dock, in increasing order of convenience. Day-to-day use is the dock UI; your pins are the durable store (in `~/.local/state/omarchy/burninc0de.dock/`), so they survive a reinstall.
 
 **Pin straight from the dock (recommended).** Right-click any empty spot on the bar: every running app that isn't on the dock yet shows up — click one to pin it. Under the hood this uses `--pin-window`, which resolves the window's class/appId back to a desktop entry (by file id, `StartupWMClass` or `Exec` basename) so the pinned icon launches properly. Pins layer on top of `UserConfig.qml` rather than replacing it, and an app already declared there is not duplicated.
 
@@ -92,11 +92,15 @@ dock's display name, not the desktop entry's.
 
 ## Configuration (UserConfig.qml)
 
-Most people never touch this — the right-click pin flow above covers adding, removing and reordering apps. It exists for when you want a declarative, version-controllable base of apps that survives a reinstall.
+Most people never need this — the right-click pin flow and `quickshelldock-pin` cover adding, removing and reordering, and your pins are the durable store (they live in `~/.local/state/omarchy/burninc0de.dock/`, so they survive a reinstall).
 
-Copy `config/UserConfig.example.qml` to `config/UserConfig.qml` and edit it to customize your apps. Both files are in the plugin directory so Quickshell's native hot reload picks up changes instantly, no restart needed.
+`UserConfig.qml` is an optional override of the default app list in `config/DockApps.qml`. It only matters for the few cases the pin tool can't express, because the tool stores just an id/name/icon/cmd/appId:
 
-`UserConfig.qml` is gitignored, so your personal config stays out of the repo. Without one, the defaults in `config/DockApps.qml` apply.
+- **Title matching** — set `match` to match a window by title substring, for webapps whose class/appId don't identify them cleanly (e.g. Gmail, Photopea).
+- **No minimize** — set `minimizable: false` so clicking a running app always focuses it instead of minimize/restore.
+- **Custom apps** — a non-running or non-`.desktop` app (a custom binary with its own icon path) that you want on the dock before it's ever launched.
+
+To use it, copy `config/UserConfig.example.qml` to `config/UserConfig.qml` and edit. It's gitignored (your personal list stays out of the repo) and hot-reloads via Quickshell — no restart needed. Without one, the defaults in `config/DockApps.qml` apply.
 
 ### App entry fields
 
@@ -187,7 +191,7 @@ exec-once = quickshell -p /path/to/burninc0de.dock
 ## Caveats
 
 - **Multiple Quickshell instances** &mdash; Quickshell doesn't support running multiple independent shells well. If you already have another Quickshell-based panel or bar, this dock will likely conflict. Test in an isolated Hyprland session first.
-- **One dock per machine** &mdash; make sure only one copy of the plugin is installed. A leftover clone under a different plugin id (e.g. an old `zeno.dock`) runs a second dock on top of this one.
+- **One dock per machine** &mdash; make sure only one copy of the plugin is installed. A leftover clone under a different plugin id runs a second dock on top of this one.
 
 ## Project structure
 
