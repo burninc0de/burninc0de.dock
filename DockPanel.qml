@@ -112,9 +112,9 @@ PanelWindow {
 
   // Settings panel state (opened from the empty-space right-click menu).
   property bool settingsOpen: false
-  // Anchored to the right-click point that opened it, so it appears where the
-  // cursor already is instead of centering over the dock bar (which stranded
-  // the mouse in the dead zone and let the close timer dismiss it first).
+  // Absolute PanelWindow X of the cursor that opened the panel. Stored
+  // absolute (not dockBar-relative) so changing icon size/spacing, which
+  // reflows dockBar.width/x, doesn't drag the panel away mid-slider.
   property real settingsAnchorX: 0
 
   // Right-click-on-empty-space menu: running apps not already on the dock.
@@ -631,7 +631,7 @@ PanelWindow {
 
   function openSettings(anchorX) {
     root.closePinMenu()
-    root.settingsAnchorX = anchorX
+    root.settingsAnchorX = dockBar.x + anchorX
     root.settingsOpen = true
   }
 
@@ -1584,10 +1584,9 @@ PanelWindow {
 
     anchors.bottom: dockBar.top
     anchors.bottomMargin: 2
-    // Anchored to the right-click point that opened it (the pin menu's own
-    // anchor), so the cursor is already over the panel when it appears and it
-    // can't close before the user reaches it. Same clamp the other menus use.
-    x: Math.max(0, Math.min(dockBar.x + root.settingsAnchorX - width / 2, root.width - width))
+    // Absolute anchor (captured at open time) so the panel stays under the
+    // cursor even while dockBar reflows underneath during slider drag.
+    x: Math.max(0, Math.min(root.settingsAnchorX - width / 2, root.width - width))
 
     HoverHandler { id: settingsHover }
 
