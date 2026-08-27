@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "burninc0de.dock",
   "name": "Stealth Dock",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "burninc0de",
   "description": "Auto-hiding Hyprland dock that respects existing panels and doesn't push into them. Launches pinned apps, tracks running windows, minimizes to special:dock_minimize.",
   "kinds": [
