@@ -10,8 +10,6 @@ import Quickshell.Io
 PanelWindow {
   id: root
 
-  required property var screen
-
   anchors.bottom: true
   anchors.left: true
   anchors.right: true
